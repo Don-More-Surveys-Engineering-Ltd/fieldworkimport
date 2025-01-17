@@ -1,0 +1,5 @@
+plugin_path: fieldworkimport
+github_organization_slug: my-organization
+project_slug: fieldworkimport
+transifex_coordinator: replace-me
+transifex_organization: replace-me
