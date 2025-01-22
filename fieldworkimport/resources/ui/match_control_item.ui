@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>match_control_item</class>
+ <widget class="QWidget" name="match_control_item">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>435</width>
+    <height>203</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QGroupBox" name="groupbox">
+     <property name="title">
+      <string>5100A - MON/SMS 1.7K</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_8">
+      <item>
+       <widget class="QRadioButton" name="other_control_radio">
+        <property name="text">
+         <string>Other (Choose)</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QgsFeaturePickerWidget" name="other_control_input"/>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="create_new_radio">
+        <property name="text">
+         <string>Create new control from this shot</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLineEdit" name="create_new_input">
+        <property name="placeholderText">
+         <string>Enter Control Point Name</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QRadioButton" name="radioButton">
+        <property name="text">
+         <string>No Match</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>QgsFeaturePickerWidget</class>
+   <extends>QWidget</extends>
+   <header>qgsfeaturepickerwidget.h</header>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

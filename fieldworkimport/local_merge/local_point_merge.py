@@ -6,7 +6,8 @@ from typing import Any, Callable, Optional, TypeVar
 
 from qgis.core import QgsFeature, QgsFeatureRequest
 
-from fieldworkimport.fieldwork.helpers import ImportStageReturn, ReturnCode, get_layers_by_table_name
+from fieldworkimport.helpers import AbortError, get_layers_by_table_name
+from fieldworkimport.local_merge.helpers import get_average_point
 from fieldworkimport.ui.same_point_shots_dialog import SamePointShotsDialog
 
 _GC_T = TypeVar("_GC_T")
@@ -89,19 +90,38 @@ def find_groups_of_same_shots(
     return [group for group in _group_consecutively(points, is_same_group) if len(group) > 1]
 
 
+def create_averaged_point(group: list[QgsFeature]):
+    fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]  # noqa: E501
+    fields = fieldworkshots_layer.fields()
+    parent_point_id_index = fields.indexFromName("parent_point_id")
+
+    # get avg point of group
+    avg_point = get_average_point(group)
+    avg_point_id = avg_point.attribute("id")
+
+    # add avg point to layer
+    fieldworkshots_layer.addFeature(avg_point)
+
+    # parent each child point with avg point
+    for point in group:
+        point[parent_point_id_index] = avg_point_id
+        # update feature on layer
+        fieldworkshots_layer.updateFeature(point)
+
+
 def local_point_merge(
     fieldwork_id: int,
     same_point_tolerance: float,
     control_point_codes: list[str],
-) -> ImportStageReturn:
+):
     fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]  # noqa: E501
 
-    points = [
+    points: list[QgsFeature] = [
         *fieldworkshots_layer.getFeatures(
             QgsFeatureRequest()
             .setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'")
             .addOrderBy("name", ascending=True),
-        ),
+        ),  # type: ignore
     ]
 
     groups = find_groups_of_same_shots(
@@ -113,6 +133,9 @@ def local_point_merge(
     dialog = SamePointShotsDialog(same_point_tolerance=same_point_tolerance, groups=groups)
     return_code = dialog.exec_()
     if return_code == dialog.Rejected:
-        return (ReturnCode.ABORT, {})
+        msg = "Aborted during local point merge stage."
+        raise AbortError(msg)
 
-    return (ReturnCode.CONTINUE, {})
+    final_groups = dialog.final_groups
+    for group in final_groups:
+        create_averaged_point(group)

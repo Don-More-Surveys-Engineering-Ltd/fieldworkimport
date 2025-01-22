@@ -15,6 +15,7 @@ class PointWarningsDialog(QDialog, Ui_PointWarningsDialog):
     ):
         super().__init__(parent)
         self.setupUi(self)
+        self.scrollAreaWidgetContents.layout().setSpacing(0)
         self.tolerances_text.setText(
             self.tolerances_text.text()
             .replace("{{hrms_tolerance}}", f"{hrms_tolerance:.2f}")

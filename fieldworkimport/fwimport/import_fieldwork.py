@@ -15,12 +15,13 @@ from qgis.core import (
     QgsVectorLayerUtils,
 )
 from qgis.gui import QgisInterface
+from qgis.PyQt.QtWidgets import QDialog, QMessageBox
 from qgis.utils import iface as _iface
 
-from fieldworkimport.fieldwork.helpers import ReturnCode, get_layers_by_table_name
-from fieldworkimport.fieldwork.parse_loc_file import parse_loc_file
-from fieldworkimport.fieldwork.parse_ref_file import parse_ref_file
-from fieldworkimport.fieldwork.parse_sum_file import parse_sum_file
+from fieldworkimport.fwimport.parse_loc_file import parse_loc_file
+from fieldworkimport.fwimport.parse_ref_file import parse_ref_file
+from fieldworkimport.fwimport.parse_sum_file import parse_sum_file
+from fieldworkimport.helpers import AbortError, get_layers_by_table_name
 
 try:
     import rw5_to_csv
@@ -32,17 +33,39 @@ except ImportError:
     sys.path.append(str(path))
     import rw5_to_csv
 
-iface: QgisInterface = _iface
+iface: QgisInterface = _iface  # type: ignore
+
+
+def warn_against_duplicate_imports(fieldwork_name: str) -> bool:
+    """Check if another fieldwork with this name already exists.
+
+    If so, warn against importing.
+    Returns False if continue, True if user wants to abort.
+    """  # noqa: DOC201
+    fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0]
+    fieldwork_layer.selectByExpression(f"\"name\" = '{fieldwork_name}'")
+    num_matches = fieldwork_layer.selectedFeatureCount()
+    fieldwork_layer.removeSelection()
+    if num_matches > 0:
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText("Possible duplicate import.")
+        msg.setInformativeText(f"Another fieldwork with the name '{fieldwork_name}' (found in RW5 file) has already been imported. Are you sure you want to continue?")
+        msg.setWindowTitle("Duplictate import detected.")
+        return_code = msg.exec()
+        if return_code == QDialog.Rejected:
+            return True
+    return False
 
 
 def create_fieldwork(
     crdb_path: str,
     rw5_path: str,
-    sum_path: Optional[str],
-    ref_path: Optional[str],
+    sum_path: Optional[str],  # noqa: FA100
+    ref_path: Optional[str],  # noqa: FA100
     loc_path: Optional[str],  # noqa: FA100
-    fieldrun_feature: Optional[QgsFeature],
-) -> tuple[ReturnCode, QgsFeature]:
+    fieldrun_feature: Optional[QgsFeature],  # noqa: FA100
+) -> QgsFeature:
     timezone = pytz.timezone("America/Halifax")
     fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0]
     fieldwork_shot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
@@ -62,6 +85,12 @@ def create_fieldwork(
 
     rw5_rows = rw5_to_csv.convert(rw5_path=Path(rw5_path), output_path=None, tzinfo=timezone)
     rw5_prelude = rw5_to_csv.prelude(rw5_path=Path(rw5_path))
+
+    # check if this has already been imported
+    if warn_against_duplicate_imports(rw5_prelude["JobName"]):
+        # user chose to abort due to duplicate
+        msg = "Aborting due to duplicate import."
+        raise AbortError(msg)
 
     crdb_connection = sqlite3.connect(crdb_path)
     crdb_connection.row_factory = sqlite3.Row
@@ -193,10 +222,8 @@ def create_fieldwork(
     # zoom layer to new fieldwork points
     iface.setActiveLayer(fieldwork_shot_layer)
     fieldwork_shot_layer.selectByExpression(f'"fieldwork_id" = \'{fieldwork_id}\'')
-    bbox = fieldwork_shot_layer.boundingBoxOfSelected()
     map_canvas = iface.mapCanvas()
-    # map_canvas.setExtent(bbox)
-    # map_canvas.refresh()
-    map_canvas.zoomToSelected(fieldwork_shot_layer)
+    if map_canvas:
+        map_canvas.zoomToSelected(fieldwork_shot_layer)
 
-    return (ReturnCode.CONTINUE, new_fieldwork)
+    return new_fieldwork

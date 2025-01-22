@@ -3,16 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from PyQt5.QtWidgets import QMessageBox, QWidget
-from qgis.core import QgsSettings
+from PyQt5.QtWidgets import QAction, QWidget
+from qgis.core import Qgis, QgsFeature, QgsSettings
+from qgis.gui import QgisInterface
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
-from qgis.utils import iface
+from qgis.utils import iface as _iface
 
-from fieldworkimport.fieldwork.helpers import ReturnCode, get_layers_by_table_name
-from fieldworkimport.fieldwork.import_fieldwork import create_fieldwork
-from fieldworkimport.fieldwork.local_point_merge import local_point_merge
-from fieldworkimport.fieldwork.validate_points import correct_codes, show_warnings, validate_points
+iface: QgisInterface = _iface  # type: ignore
+
+from fieldworkimport.frmatch.find_matches import MatchMaker
+from fieldworkimport.fwimport.import_fieldwork import create_fieldwork
+from fieldworkimport.helpers import AbortError, get_layers_by_table_name
 from fieldworkimport.ui.new_form_dialog import ImportFieldworkDialog
 
 
@@ -123,10 +124,6 @@ class Plugin:
     def _setup_import_dialog(self) -> ImportFieldworkDialog:
         dialog = ImportFieldworkDialog()
 
-        fieldrun_layer = get_layers_by_table_name("public", "sites_fieldrun", no_filter=True, raise_exception=True)[0]
-
-        dialog.fieldrun_input.setLayer(fieldrun_layer)
-
         return dialog
 
     def rollback(self):
@@ -147,7 +144,7 @@ class Plugin:
         sum_path = self.import_dialog.sum_file_input.filePath()
         ref_path = self.import_dialog.ref_file_input.filePath()
         loc_path = self.import_dialog.loc_file_input.filePath()
-        fieldrun = self.import_dialog.fieldrun_input.feature()
+        fieldrun: QgsFeature = self.import_dialog.fieldrun_input.feature()
 
         vrms_tolerance = self.import_dialog.vrms_tolerance_input.value()
         hrms_tolerance = self.import_dialog.hrms_tolerance_input.value()
@@ -157,64 +154,58 @@ class Plugin:
         parameterized_special_chars = self.import_dialog.parameterized_special_chars_input.text().split(",")
         control_point_codes = self.import_dialog.control_point_codes_input.text().split(",")
 
-        fieldwork = create_fieldwork(
-            crdb_path=crdb_path,
-            rw5_path=rw5_path,
-            sum_path=sum_path,
-            ref_path=ref_path,
-            loc_path=loc_path,
-            fieldrun_feature=fieldrun,
-        )[1]
-
-        return_code = validate_points(
-            fieldwork_id=fieldwork.attribute("id"),
-            hrms_tolerance=hrms_tolerance,
-            vrms_tolerance=vrms_tolerance,
-            valid_codes=valid_codes,
-            valid_special_chars=valid_special_chars,
-            parameterized_special_chars=parameterized_special_chars,
-        )[0]
-        if return_code == ReturnCode.ABORT:
-            self.rollback()
-            return
-
-        return_code = correct_codes(
-            fieldwork_id=fieldwork.attribute("id"),
-            valid_codes=valid_codes,
-            valid_special_chars=valid_special_chars,
-            parameterized_special_chars=parameterized_special_chars,
-        )[0]
-        if return_code == ReturnCode.ABORT:
-            self.rollback()
-            return
-
-        return_code = show_warnings(
-            fieldwork_id=fieldwork.attribute("id"),
-            hrms_tolerance=hrms_tolerance,
-            vrms_tolerance=vrms_tolerance,
-        )[0]
-        if return_code == ReturnCode.ABORT:
-            self.rollback()
-            return
-
-        return_code = local_point_merge(
-            fieldwork_id=fieldwork.attribute("id"),
-            same_point_tolerance=same_point_tolerance,
-            control_point_codes=control_point_codes,
-        )[0]
-        if return_code == ReturnCode.ABORT:
-            self.rollback()
-            return
-
-        if fieldwork:
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Information)
-            msg.setText("Success")
-            msg.setInformativeText(
-                f"Fieldwork {fieldwork.attribute('name')} done.\nNow look over your work and save changes if you like what you see, or rollback if you don't.",
+        try:
+            fieldwork = create_fieldwork(
+                crdb_path=crdb_path,
+                rw5_path=rw5_path,
+                sum_path=sum_path,
+                ref_path=ref_path,
+                loc_path=loc_path,
+                fieldrun_feature=fieldrun,
             )
-            msg.setWindowTitle("Import Complete")
-            msg.exec()
+
+            assert fieldwork is not None  # noqa: S101
+
+            # validate_points(
+            #     fieldwork_id=fieldwork.attribute("id"),
+            #     hrms_tolerance=hrms_tolerance,
+            #     vrms_tolerance=vrms_tolerance,
+            #     valid_codes=valid_codes,
+            #     valid_special_chars=valid_special_chars,
+            #     parameterized_special_chars=parameterized_special_chars,
+            # )
+
+            # correct_codes(
+            #     fieldwork_id=fieldwork.attribute("id"),
+            #     valid_codes=valid_codes,
+            #     valid_special_chars=valid_special_chars,
+            #     parameterized_special_chars=parameterized_special_chars,
+            # )
+
+            # show_warnings(
+            #     fieldwork_id=fieldwork.attribute("id"),
+            #     hrms_tolerance=hrms_tolerance,
+            #     vrms_tolerance=vrms_tolerance,
+            # )
+
+            # local_point_merge(
+            #     fieldwork_id=fieldwork.attribute("id"),
+            #     same_point_tolerance=same_point_tolerance,
+            #     control_point_codes=control_point_codes,
+            # )
+
+            mm = MatchMaker(
+                fieldwork_id=fieldwork.attribute("id"),
+                fieldrun_id=fieldrun.attribute("id") if fieldrun else None,
+                control_point_codes=control_point_codes,
+            )
+            mm.run()
+        except AbortError as e:
+            iface.messageBar().pushMessage("Import Aborted", e.args[0])  # type: ignore
+            self.rollback()
+            return
+
+        iface.messageBar().pushMessage("Import Finished", "Now look over your work and save changes when you're ready.", level=Qgis.MessageLevel.Success, duration=60)  # type: ignore
 
     def run(self) -> None:
         """Run method that performs all the real work."""

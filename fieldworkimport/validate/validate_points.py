@@ -1,13 +1,14 @@
+from collections.abc import Iterator
 from typing import Optional
 
-from qgis.core import QgsFeatureRequest
+from qgis.core import QgsFeature, QgsFeatureRequest
 from qgis.PyQt import QtWidgets
 
-from fieldworkimport.fieldwork.helpers import ImportStageReturn, ReturnCode, get_layers_by_table_name
-from fieldworkimport.fieldwork.validate_code import validate_code
+from fieldworkimport.helpers import AbortError, get_layers_by_table_name
 from fieldworkimport.ui.code_correction_dialog import CodeCorrectionDialog
 from fieldworkimport.ui.point_warning_item import PointWarningItem
 from fieldworkimport.ui.point_warnings_dialog import PointWarningsDialog
+from fieldworkimport.validate.validate_code import validate_code
 
 
 def validate_points(
@@ -17,7 +18,7 @@ def validate_points(
     valid_codes: list[str],
     valid_special_chars: list[str],
     parameterized_special_chars: list[str],
-) -> ImportStageReturn:
+):
     fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
 
     fields = fieldworkshots_layer.fields()
@@ -25,12 +26,10 @@ def validate_points(
     bad_vrms_flag_index = fields.indexFromName("bad_vrms_flag")
     bad_fixed_status_flag_index = fields.indexFromName("bad_fixed_status_flag")
     bad_code_flag_index = fields.indexFromName("bad_code_flag")
-    points = [
-        *(
-            fieldworkshots_layer.getFeatures(
-                QgsFeatureRequest().setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'"),
-            )
-        ),
+    points: list[QgsFeature] = [
+        *fieldworkshots_layer.getFeatures(
+            QgsFeatureRequest().setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'"),
+        ),  # type: ignore []
     ]
 
     fieldworkshots_layer.startEditing()
@@ -62,24 +61,22 @@ def validate_points(
         if changed:
             fieldworkshots_layer.updateFeature(point)
 
-    return (ReturnCode.CONTINUE, {})
-
 
 def correct_codes(
     fieldwork_id: int,
     valid_codes: list[str],
     valid_special_chars: list[str],
     parameterized_special_chars: list[str],
-) -> ImportStageReturn:
+):
     fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
 
     fields = fieldworkshots_layer.fields()
     code_index = fields.indexFromName("code")
     description_index = fields.indexFromName("description")
-    points = [
+    points: list[QgsFeature] = [
         *fieldworkshots_layer.getFeatures(
             QgsFeatureRequest().setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'"),
-        ),
+        ),  # type: ignore
     ]
 
     corrections = {
@@ -118,19 +115,17 @@ def correct_codes(
             point[description_index] = corrections[code] + (description[delim_index:] if delim_index else "")
             fieldworkshots_layer.updateFeature(point)
 
-    return (ReturnCode.CONTINUE, {})
-
 
 def show_warnings(
     fieldwork_id: int,
     hrms_tolerance: float,
     vrms_tolerance: float,
-) -> ImportStageReturn:
+):
     fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
 
-    points = fieldworkshots_layer.getFeatures(
+    points: Iterator[QgsFeature] = fieldworkshots_layer.getFeatures(
         QgsFeatureRequest().setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'"),
-    )
+    )  # type: ignore
 
     warning_widgets: list[QtWidgets.QWidget] = []
     for point in points:
@@ -147,13 +142,10 @@ def show_warnings(
             hrms_tolerance=hrms_tolerance,
             vrms_tolerance=vrms_tolerance,
         )
-        dialog.layout().setContentsMargins(0, 0, 0, 0)
-        dialog.scrollAreaWidgetContents.layout().setSpacing(0)
         for w in warning_widgets:
             dialog.scrollAreaWidgetContents.layout().addWidget(w)
         return_code = dialog.exec_()
         if return_code == dialog.Rejected:
             # abort process
-            return (ReturnCode.ABORT, {})
-
-    return (ReturnCode.CONTINUE, {})
+            msg = "Aborted due to point warnings."
+            raise AbortError(msg)

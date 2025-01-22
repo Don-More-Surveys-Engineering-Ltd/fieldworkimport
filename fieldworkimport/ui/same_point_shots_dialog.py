@@ -1,81 +1,12 @@
 
-import string
 from typing import Optional, cast
-from uuid import uuid4
 
 from PyQt5.QtWidgets import QDialog, QTreeWidgetItem, QWidget
-from qgis.core import QgsFeature
+from qgis.core import Qgis, QgsFeature, QgsMessageLog
 from qgis.PyQt import QtCore, QtGui
 
-from fieldworkimport.fieldwork.helpers import get_layers_by_table_name
+from fieldworkimport.local_merge.helpers import calc_parent_child_residuals, get_average_point
 from fieldworkimport.ui.generated.same_point_shots_ui import Ui_SamePointShotsDialog
-
-
-def parent_name(name: str):
-    if name[-1] not in string.ascii_letters:
-        return name + "A"
-    if name[-1] == "Z":
-        return name + "A"
-    return name[:-1] + chr(ord(name[-1]) + 1)
-
-
-def get_merged_point(points: list[QgsFeature]) -> QgsFeature:  # noqa: D103, PLR0914
-    n = len(points)
-
-    layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
-    f = QgsFeature(points[0])
-    fields = layer.fields()
-    id_index = fields.indexFromName("id")
-    name_index = fields.indexFromName("name")
-    northing_index = fields.indexFromName("northing")
-    easting_index = fields.indexFromName("easting")
-    elevation_index = fields.indexFromName("elevation")
-    HRMS_index = fields.indexFromName("HRMS")  # noqa: N806
-    VRMS_index = fields.indexFromName("VRMS")  # noqa: N806
-    PDOP_index = fields.indexFromName("PDOP")  # noqa: N806
-    HDOP_index = fields.indexFromName("HDOP")  # noqa: N806
-    VDOP_index = fields.indexFromName("VDOP")  # noqa: N806
-    TDOP_index = fields.indexFromName("TDOP")  # noqa: N806
-    GDOP_index = fields.indexFromName("GDOP")  # noqa: N806
-
-    n_with_HRMS = len([p for p in points if p[HRMS_index]])  # noqa: N806
-    n_with_VRMS = len([p for p in points if p[VRMS_index]])  # noqa: N806
-    n_with_PDOP = len([p for p in points if p[PDOP_index]])  # noqa: N806
-    n_with_HDOP = len([p for p in points if p[HDOP_index]])  # noqa: N806
-    n_with_VDOP = len([p for p in points if p[VDOP_index]])  # noqa: N806
-    n_with_TDOP = len([p for p in points if p[TDOP_index]])  # noqa: N806
-    n_with_GDOP = len([p for p in points if p[GDOP_index]])  # noqa: N806
-
-    f[id_index] = str(uuid4())
-    f[name_index] = parent_name(f[name_index])
-    f[northing_index] = sum(p[northing_index] for p in points) / n
-    f[easting_index] = sum(p[easting_index] for p in points) / n
-    f[elevation_index] = sum(p[elevation_index] for p in points) / n
-    f[HRMS_index] = sum(p[HRMS_index] for p in points if p[HRMS_index]) / max(n_with_HRMS, 1)
-    f[VRMS_index] = sum(p[VRMS_index] for p in points if p[VRMS_index]) / max(n_with_VRMS, 1)
-    f[PDOP_index] = sum(p[PDOP_index] for p in points if p[PDOP_index]) / max(n_with_PDOP, 1)
-    f[HDOP_index] = sum(p[HDOP_index] for p in points if p[HDOP_index]) / max(n_with_HDOP, 1)
-    f[VDOP_index] = sum(p[VDOP_index] for p in points if p[VDOP_index]) / max(n_with_VDOP, 1)
-    f[TDOP_index] = sum(p[TDOP_index] for p in points if p[TDOP_index]) / max(n_with_TDOP, 1)
-    f[GDOP_index] = sum(p[GDOP_index] for p in points if p[GDOP_index]) / max(n_with_GDOP, 1)
-
-    return f
-
-
-def calc_residuals(parent_point: QgsFeature, child_point: QgsFeature):
-    parent_point_northing = parent_point.attribute("northing")
-    parent_point_easting = parent_point.attribute("easting")
-    parent_point_elevation = parent_point.attribute("elevation")
-    child_point_northing = child_point.attribute("northing")
-    child_point_easting = child_point.attribute("easting")
-    child_point_elevation = child_point.attribute("elevation")
-
-    return (
-        parent_point_northing - child_point_northing,
-        parent_point_easting - child_point_easting,
-        parent_point_elevation - child_point_elevation,
-    )
-
 
 PARENT_POINT_TREE_WIDGET_FONT = QtGui.QFont()
 PARENT_POINT_TREE_WIDGET_FONT.setPointSize(11)
@@ -104,7 +35,7 @@ class ChildPointTreeWidgetItem(QTreeWidgetItem):
         self.last_checked_state = True
 
     def show_point(self):
-        residuals = calc_residuals(parent_point=self.parent_point, child_point=self.point)
+        residuals = calc_parent_child_residuals(parent_point=self.parent_point, child_point=self.point)
         cols = [
             self.point.attribute("name"),
             f"{self.point.attribute('northing'):.3f}",
@@ -116,14 +47,6 @@ class ChildPointTreeWidgetItem(QTreeWidgetItem):
         ]
         for i, text in enumerate(cols):
             self.setText(i, text)
-
-    def setData(self, column: int, role: int, value) -> None:
-        checked = self.checkState(0) == QtCore.Qt.CheckState.Checked
-        # prevents infinite loop
-        if checked != self.last_checked_state:
-            self.parent_point_widget_item.recalc_point()
-        self.last_checked_state = checked
-        return super().setData(column, role, value)
 
     def update_parent(self, parent_point: QgsFeature):
         self.parent_point = parent_point
@@ -137,7 +60,7 @@ class ParentPointTreeWidgetItem(QTreeWidgetItem):
     def __init__(self, child_points: list[QgsFeature]) -> None:
         super().__init__()
         self.child_points = child_points
-        self.parent_point = get_merged_point(self.child_points)
+        self.parent_point = get_average_point(self.child_points)
 
         # set special font for parent
         for i in range(self.columnCount()):
@@ -177,7 +100,7 @@ class ParentPointTreeWidgetItem(QTreeWidgetItem):
                 features.append(child.point)
         if not features:
             return
-        self.parent_point = get_merged_point(features)
+        self.parent_point = get_average_point(features)
         self.show_point()
 
         # update children with new point
@@ -185,8 +108,21 @@ class ParentPointTreeWidgetItem(QTreeWidgetItem):
             child = cast("ChildPointTreeWidgetItem", self.child(i))
             child.update_parent(self.parent_point)
 
+    def get_checked_child_points(self) -> list[QgsFeature]:
+        features = []
+        for i in range(self.childCount()):
+            child = cast("ChildPointTreeWidgetItem", self.child(i))
+            if child.checkState(0) == QtCore.Qt.CheckState.Checked:
+                features.append(child.point)
+        return features
+
+    def is_enabled(self) -> bool:
+        return self.checkState(0) == QtCore.Qt.CheckState.Checked
+
 
 class SamePointShotsDialog(QDialog, Ui_SamePointShotsDialog):
+    final_groups: list[list[QgsFeature]]
+
     def __init__(
         self,
         same_point_tolerance: float,
@@ -194,6 +130,7 @@ class SamePointShotsDialog(QDialog, Ui_SamePointShotsDialog):
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
+        self.final_groups = []
         self.setupUi(self)
 
         # show actual tolerance in label
@@ -211,3 +148,32 @@ class SamePointShotsDialog(QDialog, Ui_SamePointShotsDialog):
         # resize columns to fit data
         for i in range(self.tree_widget.columnCount()):
             self.tree_widget.resizeColumnToContents(i)
+
+        self.tree_widget.itemChanged.connect(self.on_tree_widget_item_changed)
+
+    def on_tree_widget_item_changed(self, item: QTreeWidgetItem):
+        if isinstance(item, ParentPointTreeWidgetItem):
+            QgsMessageLog.logMessage("parent checked", level=Qgis.MessageLevel.Info)
+        elif isinstance(item, ChildPointTreeWidgetItem):
+            QgsMessageLog.logMessage("child checked", level=Qgis.MessageLevel.Info)
+            item = cast("ChildPointTreeWidgetItem", item)
+            item.parent_point_widget_item.recalc_point()
+
+    def get_final_groups(self) -> list[list[QgsFeature]]:
+        """Get the list of groups of points."""  # noqa: DOC201
+        groups = []
+        for i in range(self.tree_widget.topLevelItemCount()):
+            item = self.tree_widget.topLevelItem(i)
+            if not isinstance(item, ParentPointTreeWidgetItem):
+                QgsMessageLog.logMessage("Expected only ParentPointTreeWidgetItems in top level items.", level=Qgis.MessageLevel.Critical)
+                continue
+            item = cast("ParentPointTreeWidgetItem", item)
+            group = item.get_checked_child_points()
+            # don't append empty groups
+            if len(group) >= 2:  # noqa: PLR2004
+                groups.append(group)
+        return groups
+
+    def accept(self) -> None:
+        self.final_groups = self.get_final_groups()
+        return super().accept()

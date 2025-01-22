@@ -5,6 +5,7 @@ from typing import Optional
 from PyQt5.QtWidgets import QDialog, QMessageBox, QWidget
 from qgis.core import QgsSettings
 
+from fieldworkimport.helpers import get_layers_by_table_name
 from fieldworkimport.ui.generated.new_form_ui import Ui_ImportDialog
 
 
@@ -13,6 +14,10 @@ class ImportFieldworkDialog(QDialog, Ui_ImportDialog):
         super().__init__(parent)
         self.setupUi(self)
         self._set_validation_inputs()
+
+        # setup feature picker with layer
+        fieldrun_layer = get_layers_by_table_name("public", "sites_fieldrun", no_filter=True, raise_exception=True)[0]
+        self.fieldrun_input.setLayer(fieldrun_layer)
 
         def auto_complete_files():
             path = self.crdb_file_input.filePath()
