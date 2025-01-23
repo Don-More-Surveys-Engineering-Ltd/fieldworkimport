@@ -1,62 +1,25 @@
-from contextlib import contextmanager
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
 from qgis.core import (
     Qgis,
-    QgsApplication,
-    QgsAuthMethodConfig,
-    QgsDataSourceUri,
     QgsFeature,
     QgsFeatureRequest,
     QgsMessageLog,
-    QgsVectorLayer,
     QgsVectorLayerUtils,
 )
-from qgis.PyQt.QtSql import QSqlDatabase, QSqlQuery
+from qgis.PyQt.QtSql import QSqlQuery
 
-from fieldworkimport.helpers import get_layers_by_table_name
+from fieldworkimport.helpers import layer_database_connection
 from fieldworkimport.ui.match_control_item import MatchControlItem
 from fieldworkimport.ui.match_to_controls_dialog import MatchToControlsDialog
 
-
-@contextmanager
-def layer_database_connection(layer: QgsVectorLayer):
-    # Get the data source URI from the layer
-    uri = QgsDataSourceUri(layer.dataProvider().dataSourceUri())  # type: ignore
-
-    # Set up the database connection using the layer's connection details
-    db = QSqlDatabase.addDatabase("QPSQL")  # Use the QPSQL driver for PostGIS
-    db.setHostName(uri.host())  # Database host
-    db.setPort(int(uri.port()))  # Database port (default 5432)
-    db.setDatabaseName(uri.database())  # Database name
-    db.setUserName(uri.username())  # Username
-    db.setPassword(uri.password())  # Password
-    db.setConnectOptions()
-
-    authcfg_id = uri.authConfigId()
-    if authcfg_id:
-        mgr = QgsApplication.authManager()
-        assert mgr  # noqa: S101
-        authcfg = QgsAuthMethodConfig()
-        mgr.loadAuthenticationConfig(authcfg_id, authcfg, True)  # noqa: FBT003
-        auth_info = authcfg.configMap()
-        db.setUserName(auth_info["username"])
-        db.setPassword(auth_info["password"])
-
-    if not db.open():
-        err = db.lastError()
-        raise ValueError(err)
-
-    try:
-        yield db
-    finally:
-        db.close()
+if TYPE_CHECKING:
+    from fieldworkimport.process import FieldworkImportLayers
 
 
-class MatchMaker:
-    fieldworkshots_layer: QgsVectorLayer
-    fieldrunshots_layer: QgsVectorLayer
+class FieldRunMatchStage:
+    layers: "FieldworkImportLayers"
     fw_matching_fieldrun_shot_id_index: int
     fieldwork_id: str
     fieldrun_id: Optional[int]  # noqa: FA100
@@ -64,30 +27,31 @@ class MatchMaker:
 
     def __init__(  # noqa: D107
         self,
+        layers: "FieldworkImportLayers",
         fieldwork_id: str,
         fieldrun_id: Optional[int],  # noqa: FA100
         control_point_codes: list[str],
     ) -> None:
+        self.layers = layers
         self.fieldwork_id = fieldwork_id
         self.fieldrun_id = fieldrun_id
         self.control_point_codes = control_point_codes
-        self.fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]  # noqa: E501
-        self.fieldrunshots_layer = get_layers_by_table_name("public", "sites_fieldrunshot", no_filter=True, raise_exception=True)[0]  # noqa: E501
-        self.controlpointdata_layer = get_layers_by_table_name("public", "sites_controlpointdata", no_filter=True, raise_exception=True)[0]  # noqa: E501
-        self.controlpointcoordinate_layer = get_layers_by_table_name("public", "sites_controlpointcoordinate", no_filter=True, raise_exception=True)[0]  # noqa: E501
 
-        fw_fields = self.fieldworkshots_layer.fields()
+        fw_fields = self.layers.fieldworkshot_layer.fields()
         self.fw_matching_fieldrun_shot_id_index = fw_fields.indexFromName("matching_fieldrun_shot_id")
 
     def run(self):
         """Start finding matches."""
+        QgsMessageLog.logMessage(
+            "FieldRunMatchStage.run started.",
+        )
         self.match_controls()
         if self.fieldrun_id:
             self.match_on_name()
 
     def create_fieldrun_control_shot(self, name: str, based_on_fieldwork_shot: QgsFeature) -> QgsFeature:
-        new_control = QgsVectorLayerUtils.createFeature(self.fieldrunshots_layer)
-        fields = self.fieldrunshots_layer.fields()
+        new_control = QgsVectorLayerUtils.createFeature(self.layers.fieldrunshot_layer)
+        fields = self.layers.fieldrunshot_layer.fields()
         new_control[fields.indexFromName("id")] = str(uuid4())
         new_control[fields.indexFromName("name")] = name
         new_control[fields.indexFromName("type")] = "Control"
@@ -95,18 +59,18 @@ class MatchMaker:
         new_control[fields.indexFromName("description")] = f"[Genrated to match shot {based_on_fieldwork_shot.attribute('name')}]"
         new_control.setGeometry(based_on_fieldwork_shot.geometry())
 
-        self.fieldrunshots_layer.addFeature(new_control)
+        self.layers.fieldrunshot_layer.addFeature(new_control)
         return new_control
 
     def assign_fr_shot(self, fw_shot: QgsFeature, fr_shot_id: str) -> None:
         """Assign fieldrun show as match for fieldwork shot, and that shot's ancestors."""
         fw_shot[self.fw_matching_fieldrun_shot_id_index] = fr_shot_id
-        self.fieldworkshots_layer.updateFeature(fw_shot)
+        self.layers.fieldworkshot_layer.updateFeature(fw_shot)
 
         # recurse up ancestor tree.
         parent_point_id = fw_shot.attribute("parent_point_id")
         if parent_point_id:
-            parent_point = self.fieldworkshots_layer.getFeature(parent_point_id)
+            parent_point = self.layers.fieldworkshot_layer.getFeature(parent_point_id)
             self.assign_fr_shot(parent_point, fr_shot_id)
 
     def match_on_name(self) -> None:
@@ -119,14 +83,14 @@ class MatchMaker:
             raise ValueError(msg)
 
         fw_points: list[QgsFeature] = [
-            *self.fieldworkshots_layer.getFeatures(
+            *self.layers.fieldworkshot_layer.getFeatures(
                 QgsFeatureRequest()
                 .setFilterExpression(f"\"fieldwork_id\" = '{self.fieldwork_id}'"),
             ),  # type: ignore []
         ]
 
         fr_points: list[QgsFeature] = [
-            *self.fieldrunshots_layer.getFeatures(
+            *self.layers.fieldrunshot_layer.getFeatures(
                 QgsFeatureRequest()
                 .setFilterExpression(f"\"fieldrun_id\" = '{self.fieldrun_id}'"),
             ),  # type: ignore []
@@ -154,11 +118,11 @@ class MatchMaker:
         # find control-type fieldwork shots that need fieldrunshot matches.
         cp_code_clause = " OR ".join([f"\"code\" like '{code}'" for code in self.control_point_codes])
         # Points with a cp code (mon or cp), are parent points, and are of the current fieldwork.
-        fw_controls_needing_matches: list[QgsFeature] = [*self.fieldworkshots_layer.getFeatures(
+        fw_controls_needing_matches: list[QgsFeature] = [*self.layers.fieldworkshot_layer.getFeatures(
             f'"fieldwork_id" = \'{self.fieldwork_id}\' and "parent_point_id" is null and ({cp_code_clause})',
         )]  # type: ignore []
 
-        with layer_database_connection(self.fieldrunshots_layer) as db:
+        with layer_database_connection(self.layers.fieldrunshot_layer) as db:
             # add widget for each fieldworkshot control
             for fw_shot in fw_controls_needing_matches:
                 # find nearby suggestions
@@ -191,10 +155,10 @@ class MatchMaker:
                 # turn list of ids into list of qgis features
                 ids_str = ", ".join([f"'{i}'" for i in feature_ids])
                 expression = f'"id" in ({ids_str})'
-                suggestions = [*self.fieldrunshots_layer.getFeatures(expression)]  # type: ignore []
+                suggestions = [*self.layers.fieldrunshot_layer.getFeatures(expression)]  # type: ignore []
 
                 # add widget for fieldworkshot matching
-                match_control_item = MatchControlItem(fw_shot, suggestions, allow_create_new=allow_create_new)
+                match_control_item = MatchControlItem(self.layers, fw_shot, suggestions, allow_create_new=allow_create_new)
                 dialog.scrollAreaContents.layout().addWidget(match_control_item)
 
         dialog.exec()

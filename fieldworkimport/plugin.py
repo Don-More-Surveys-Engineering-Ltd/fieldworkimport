@@ -4,16 +4,16 @@ from pathlib import Path
 from typing import Callable
 
 from PyQt5.QtWidgets import QAction, QWidget
-from qgis.core import Qgis, QgsFeature, QgsSettings
+from qgis.core import Qgis, QgsFeature, QgsSettings, QgsVectorLayer
 from qgis.gui import QgisInterface
 from qgis.PyQt.QtGui import QIcon
 from qgis.utils import iface as _iface
 
+from fieldworkimport.process import FieldworkImportProcess
+
 iface: QgisInterface = _iface  # type: ignore
 
-from fieldworkimport.frmatch.find_matches import MatchMaker
-from fieldworkimport.fwimport.import_fieldwork import create_fieldwork
-from fieldworkimport.helpers import AbortError, get_layers_by_table_name
+from fieldworkimport.exceptions import AbortError
 from fieldworkimport.ui.new_form_dialog import ImportFieldworkDialog
 
 
@@ -23,6 +23,11 @@ class Plugin:
     name = "fieldworkimport"
     import_dialog: ImportFieldworkDialog | None
     active_fieldwork_feature = None
+
+    geopackage_path: str
+    geopackage_layers_group_name: str
+    fieldwork_layer: QgsVectorLayer
+    fieldworkshot_layer: QgsVectorLayer
 
     def __init__(self) -> None:
         self.actions: list[QAction] = []
@@ -126,19 +131,10 @@ class Plugin:
 
         return dialog
 
-    def rollback(self):
-        # rollback changes.
-        get_layers_by_table_name("public", "sites_fieldrun", no_filter=True, raise_exception=True)[0].rollBack()
-        get_layers_by_table_name("public", "sites_fieldrunshotimage", no_filter=True, raise_exception=True)[0].rollBack()
-        get_layers_by_table_name("public", "sites_fieldrunshot", no_filter=True, raise_exception=True)[0].rollBack()
-        get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0].rollBack()
-        get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0].rollBack()
-        get_layers_by_table_name("public", "sites_pipe", no_filter=True, raise_exception=True)[0].rollBack()
-        get_layers_by_table_name("public", "sites_measurement", no_filter=True, raise_exception=True)[0].rollBack()
-
     def _on_accept_new_form(self):
         if not self.import_dialog:
             return
+
         crdb_path = self.import_dialog.crdb_file_input.filePath()
         rw5_path = self.import_dialog.rw5_file_input.filePath()
         sum_path = self.import_dialog.sum_file_input.filePath()
@@ -154,55 +150,26 @@ class Plugin:
         parameterized_special_chars = self.import_dialog.parameterized_special_chars_input.text().split(",")
         control_point_codes = self.import_dialog.control_point_codes_input.text().split(",")
 
+        fwimport = FieldworkImportProcess(
+            vrms_tolerance,
+            hrms_tolerance,
+            same_point_tolerance,
+            valid_codes,
+            valid_special_chars,
+            parameterized_special_chars,
+            control_point_codes,
+            crdb_path,
+            rw5_path,
+            sum_path,
+            ref_path,
+            loc_path,
+            fieldrun,
+        )
+
         try:
-            fieldwork = create_fieldwork(
-                crdb_path=crdb_path,
-                rw5_path=rw5_path,
-                sum_path=sum_path,
-                ref_path=ref_path,
-                loc_path=loc_path,
-                fieldrun_feature=fieldrun,
-            )
-
-            assert fieldwork is not None  # noqa: S101
-
-            # validate_points(
-            #     fieldwork_id=fieldwork.attribute("id"),
-            #     hrms_tolerance=hrms_tolerance,
-            #     vrms_tolerance=vrms_tolerance,
-            #     valid_codes=valid_codes,
-            #     valid_special_chars=valid_special_chars,
-            #     parameterized_special_chars=parameterized_special_chars,
-            # )
-
-            # correct_codes(
-            #     fieldwork_id=fieldwork.attribute("id"),
-            #     valid_codes=valid_codes,
-            #     valid_special_chars=valid_special_chars,
-            #     parameterized_special_chars=parameterized_special_chars,
-            # )
-
-            # show_warnings(
-            #     fieldwork_id=fieldwork.attribute("id"),
-            #     hrms_tolerance=hrms_tolerance,
-            #     vrms_tolerance=vrms_tolerance,
-            # )
-
-            # local_point_merge(
-            #     fieldwork_id=fieldwork.attribute("id"),
-            #     same_point_tolerance=same_point_tolerance,
-            #     control_point_codes=control_point_codes,
-            # )
-
-            mm = MatchMaker(
-                fieldwork_id=fieldwork.attribute("id"),
-                fieldrun_id=fieldrun.attribute("id") if fieldrun else None,
-                control_point_codes=control_point_codes,
-            )
-            mm.run()
+            fwimport.run()
         except AbortError as e:
-            iface.messageBar().pushMessage("Import Aborted", e.args[0])  # type: ignore
-            self.rollback()
+            iface.messageBar().pushMessage("Import Aborted", e.args[0], level=Qgis.MessageLevel.Critical)  # type: ignore
             return
 
         iface.messageBar().pushMessage("Import Finished", "Now look over your work and save changes when you're ready.", level=Qgis.MessageLevel.Success, duration=60)  # type: ignore

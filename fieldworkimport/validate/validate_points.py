@@ -1,10 +1,10 @@
 from collections.abc import Iterator
 from typing import Optional
 
-from qgis.core import QgsFeature, QgsFeatureRequest
+from qgis.core import QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVectorLayer
 from qgis.PyQt import QtWidgets
 
-from fieldworkimport.helpers import AbortError, get_layers_by_table_name
+from fieldworkimport.exceptions import AbortError
 from fieldworkimport.ui.code_correction_dialog import CodeCorrectionDialog
 from fieldworkimport.ui.point_warning_item import PointWarningItem
 from fieldworkimport.ui.point_warnings_dialog import PointWarningsDialog
@@ -12,6 +12,7 @@ from fieldworkimport.validate.validate_code import validate_code
 
 
 def validate_points(
+    fieldworkshot_layer: QgsVectorLayer,
     fieldwork_id: int,
     hrms_tolerance: float,
     vrms_tolerance: float,
@@ -19,20 +20,21 @@ def validate_points(
     valid_special_chars: list[str],
     parameterized_special_chars: list[str],
 ):
-    fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
-
-    fields = fieldworkshots_layer.fields()
+    QgsMessageLog.logMessage(
+        "Validate points started.",
+    )
+    fields = fieldworkshot_layer.fields()
     bad_hrms_flag_index = fields.indexFromName("bad_hrms_flag")
     bad_vrms_flag_index = fields.indexFromName("bad_vrms_flag")
     bad_fixed_status_flag_index = fields.indexFromName("bad_fixed_status_flag")
     bad_code_flag_index = fields.indexFromName("bad_code_flag")
     points: list[QgsFeature] = [
-        *fieldworkshots_layer.getFeatures(
+        *fieldworkshot_layer.getFeatures(
             QgsFeatureRequest().setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'"),
         ),  # type: ignore []
     ]
 
-    fieldworkshots_layer.startEditing()
+    fieldworkshot_layer.startEditing()
     for point in points:
         hrms: float = point.attribute("HRMS")
         vrms: float = point.attribute("VRMS")
@@ -59,22 +61,24 @@ def validate_points(
             point.setAttribute(bad_code_flag_index, True)
             changed = True
         if changed:
-            fieldworkshots_layer.updateFeature(point)
+            fieldworkshot_layer.updateFeature(point)
 
 
 def correct_codes(
+    fieldworkshot_layer: QgsVectorLayer,
     fieldwork_id: int,
     valid_codes: list[str],
     valid_special_chars: list[str],
     parameterized_special_chars: list[str],
 ):
-    fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
-
-    fields = fieldworkshots_layer.fields()
+    QgsMessageLog.logMessage(
+        "Correct points started.",
+    )
+    fields = fieldworkshot_layer.fields()
     code_index = fields.indexFromName("code")
     description_index = fields.indexFromName("description")
     points: list[QgsFeature] = [
-        *fieldworkshots_layer.getFeatures(
+        *fieldworkshot_layer.getFeatures(
             QgsFeatureRequest().setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'"),
         ),  # type: ignore
     ]
@@ -83,7 +87,7 @@ def correct_codes(
         "__bad_code__": "__good_code__",
     }
 
-    fieldworkshots_layer.startEditing()
+    fieldworkshot_layer.startEditing()
     for point in points:
         code = point.attribute("code")
         description: str = point.attribute("description")
@@ -113,17 +117,19 @@ def correct_codes(
             point[code_index] = corrections[code]
             delim_index = description.find("/")
             point[description_index] = corrections[code] + (description[delim_index:] if delim_index else "")
-            fieldworkshots_layer.updateFeature(point)
+            fieldworkshot_layer.updateFeature(point)
 
 
 def show_warnings(
+    fieldworkshot_layer: QgsVectorLayer,
     fieldwork_id: int,
     hrms_tolerance: float,
     vrms_tolerance: float,
 ):
-    fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
-
-    points: Iterator[QgsFeature] = fieldworkshots_layer.getFeatures(
+    QgsMessageLog.logMessage(
+        "Show warnings started.",
+    )
+    points: Iterator[QgsFeature] = fieldworkshot_layer.getFeatures(
         QgsFeatureRequest().setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'"),
     )  # type: ignore
 

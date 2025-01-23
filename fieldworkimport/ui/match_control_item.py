@@ -1,12 +1,15 @@
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from PyQt5.QtWidgets import QRadioButton, QWidget
 from qgis.core import Qgis, QgsFeature, QgsMessageLog
 
-from fieldworkimport.helpers import AbortError, get_layers_by_table_name
+from fieldworkimport.exceptions import AbortError
 from fieldworkimport.ui.generated.match_control_item import Ui_match_control_item
+
+if TYPE_CHECKING:
+    from fieldworkimport.process import FieldworkImportLayers
 
 
 @dataclass
@@ -17,25 +20,21 @@ class ControlMatchResult:
     # if matched_fieldrunshot is None, create a new fieldrunshot using this name.
 
 
-def calc_redisuals(fw_shot: QgsFeature, fr_shot: QgsFeature):
-    controlpointdata_layer = get_layers_by_table_name("public", "sites_controlpointdata", no_filter=True, raise_exception=True)[0]  # noqa: E501
-    controlpointcoordinate_layer = get_layers_by_table_name("public", "sites_controlpointcoordinate", no_filter=True, raise_exception=True)[0]  # noqa: E501
-    controlpointelevation_layer = get_layers_by_table_name("public", "sites_controlpointelevation", no_filter=True, raise_exception=True)[0]  # noqa: E501
-
+def calc_redisuals(layers: "FieldworkImportLayers", fw_shot: QgsFeature, fr_shot: QgsFeature):
     fr_shot_id = fr_shot.attribute("id")
-    controlpointdata: Optional[QgsFeature] = next(controlpointdata_layer.getFeatures(f"\"fieldrun_shot_id\" = '{fr_shot_id}'"), None)  # type: ignore
+    controlpointdata: Optional[QgsFeature] = next(layers.controlpointdata_layer.getFeatures(f"\"fieldrun_shot_id\" = '{fr_shot_id}'"), None)  # type: ignore
     if not controlpointdata:
         msg = "Fieldrun Shot has no control point data. Invalid for control residuals."
         raise ValueError(msg)
     primary_coord_id = controlpointdata.attribute("primary_coord_id")
     primary_elevation_id = controlpointdata.attribute("primary_elevation_id")
-    primary_coordinate: Optional[QgsFeature] = next(controlpointcoordinate_layer.getFeatures(f"\"id\" = '{primary_coord_id}'"), None)  # type: ignore
+    primary_coordinate: Optional[QgsFeature] = next(layers.controlpointcoordinate_layer.getFeatures(f"\"id\" = '{primary_coord_id}'"), None)  # type: ignore
     if not primary_coordinate:
         msg = "Fieldrun Shot has no primary coordinate. Invalid for control residuals."
         raise ValueError(msg)
 
     # primary elevation is not required
-    primary_elevation: Optional[QgsFeature] = next(controlpointelevation_layer.getFeatures(f"\"id\" = '{primary_elevation_id}'"), None)  # type: ignore
+    primary_elevation: Optional[QgsFeature] = next(layers.controlpointelevation_layer.getFeatures(f"\"id\" = '{primary_elevation_id}'"), None)  # type: ignore
 
     fw_easting: float = fw_shot.attribute("easting")
     fw_northing: float = fw_shot.attribute("northing")
@@ -46,9 +45,9 @@ def calc_redisuals(fw_shot: QgsFeature, fr_shot: QgsFeature):
     fr_elevation: Optional[float] = primary_elevation.attribute("elev") if primary_elevation else None
 
     return (
-        fw_easting - fr_easting,
-        fw_northing - fr_northing,
-        (fw_elevation - fr_elevation) if fr_elevation else None,
+        fr_easting - fw_easting,
+        fr_northing - fw_northing,
+        (fr_elevation - fw_elevation) if fr_elevation else None,
     )
 
 
@@ -58,6 +57,7 @@ class MatchControlItem(QWidget, Ui_match_control_item):
 
     def __init__(
         self,
+        layers: "FieldworkImportLayers",
         fieldwork_shot: QgsFeature,
         suggested_fieldrun_shots: list[QgsFeature],
         allow_create_new: bool,
@@ -67,8 +67,8 @@ class MatchControlItem(QWidget, Ui_match_control_item):
         self.setupUi(self)
 
         # setup feature picker with layer
-        fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", no_filter=True, raise_exception=True)[0]
-        self.other_control_input.setLayer(fieldrunshot_layer)
+        self.layers = layers
+        self.other_control_input.setLayer(layers.fieldrunshot_layer)
         self.other_control_input.setFilterExpression("\"type\" = 'Control'")
 
         self.fieldwork_shot = fieldwork_shot
@@ -111,9 +111,9 @@ class MatchControlItem(QWidget, Ui_match_control_item):
     def add_suggestion_radio(self, suggestion_fieldrun_shot: QgsFeature):
         radio = QRadioButton()
         suggestion_name = suggestion_fieldrun_shot.attribute("name")
-        residuals = calc_redisuals(self.fieldwork_shot, suggestion_fieldrun_shot)
+        residuals = calc_redisuals(self.layers, self.fieldwork_shot, suggestion_fieldrun_shot)
         radio.setText(f"{suggestion_name} - ({residuals[0]:.3f}, {residuals[1]:.3f}, {round(residuals[2], 3) if residuals[2] else 'N/A'})")
-        radio.feature = suggestion_fieldrun_shot
+        radio.feature = suggestion_fieldrun_shot  # type: ignore []
         self.verticalLayout_8.insertWidget(0, radio)
 
     def get_result(self) -> Optional[ControlMatchResult]:  # noqa: FA100

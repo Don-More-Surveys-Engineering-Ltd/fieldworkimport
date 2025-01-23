@@ -4,9 +4,9 @@ import math
 from collections.abc import Generator, Iterable, Sequence
 from typing import Any, Callable, Optional, TypeVar
 
-from qgis.core import QgsFeature, QgsFeatureRequest
+from qgis.core import QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVectorLayer
 
-from fieldworkimport.helpers import AbortError, get_layers_by_table_name
+from fieldworkimport.exceptions import AbortError
 from fieldworkimport.local_merge.helpers import get_average_point
 from fieldworkimport.ui.same_point_shots_dialog import SamePointShotsDialog
 
@@ -90,34 +90,38 @@ def find_groups_of_same_shots(
     return [group for group in _group_consecutively(points, is_same_group) if len(group) > 1]
 
 
-def create_averaged_point(group: list[QgsFeature]):
-    fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]  # noqa: E501
-    fields = fieldworkshots_layer.fields()
+def create_averaged_point(
+    fieldworkshot_layer: QgsVectorLayer,
+    group: list[QgsFeature],
+):
+    fields = fieldworkshot_layer.fields()
     parent_point_id_index = fields.indexFromName("parent_point_id")
 
     # get avg point of group
-    avg_point = get_average_point(group)
+    avg_point = get_average_point(fieldworkshot_layer, group)
     avg_point_id = avg_point.attribute("id")
 
     # add avg point to layer
-    fieldworkshots_layer.addFeature(avg_point)
+    fieldworkshot_layer.addFeature(avg_point)
 
     # parent each child point with avg point
     for point in group:
         point[parent_point_id_index] = avg_point_id
         # update feature on layer
-        fieldworkshots_layer.updateFeature(point)
+        fieldworkshot_layer.updateFeature(point)
 
 
 def local_point_merge(
+    fieldworkshot_layer: QgsVectorLayer,
     fieldwork_id: int,
     same_point_tolerance: float,
     control_point_codes: list[str],
 ):
-    fieldworkshots_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]  # noqa: E501
-
+    QgsMessageLog.logMessage(
+        "Local point merge started.",
+    )
     points: list[QgsFeature] = [
-        *fieldworkshots_layer.getFeatures(
+        *fieldworkshot_layer.getFeatures(
             QgsFeatureRequest()
             .setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'")
             .addOrderBy("name", ascending=True),
@@ -130,7 +134,7 @@ def local_point_merge(
         control_point_codes=control_point_codes,
     )
 
-    dialog = SamePointShotsDialog(same_point_tolerance=same_point_tolerance, groups=groups)
+    dialog = SamePointShotsDialog(fieldworkshot_layer, same_point_tolerance=same_point_tolerance, groups=groups)
     return_code = dialog.exec_()
     if return_code == dialog.Rejected:
         msg = "Aborted during local point merge stage."
@@ -138,4 +142,4 @@ def local_point_merge(
 
     final_groups = dialog.final_groups
     for group in final_groups:
-        create_averaged_point(group)
+        create_averaged_point(fieldworkshot_layer, group)

@@ -2,7 +2,7 @@
 from typing import Optional, cast
 
 from PyQt5.QtWidgets import QDialog, QTreeWidgetItem, QWidget
-from qgis.core import Qgis, QgsFeature, QgsMessageLog
+from qgis.core import Qgis, QgsFeature, QgsMessageLog, QgsVectorLayer
 from qgis.PyQt import QtCore, QtGui
 
 from fieldworkimport.local_merge.helpers import calc_parent_child_residuals, get_average_point
@@ -56,11 +56,13 @@ class ChildPointTreeWidgetItem(QTreeWidgetItem):
 class ParentPointTreeWidgetItem(QTreeWidgetItem):
     parent_point: QgsFeature
     child_points: list[QgsFeature]
+    fieldworkshot_layer: QgsVectorLayer
 
-    def __init__(self, child_points: list[QgsFeature]) -> None:
+    def __init__(self, fieldworkshot_layer: QgsVectorLayer, child_points: list[QgsFeature]) -> None:
         super().__init__()
+        self.fieldworkshot_layer = fieldworkshot_layer
         self.child_points = child_points
-        self.parent_point = get_average_point(self.child_points)
+        self.parent_point = get_average_point(self.fieldworkshot_layer, self.child_points)
 
         # set special font for parent
         for i in range(self.columnCount()):
@@ -100,7 +102,7 @@ class ParentPointTreeWidgetItem(QTreeWidgetItem):
                 features.append(child.point)
         if not features:
             return
-        self.parent_point = get_average_point(features)
+        self.parent_point = get_average_point(self.fieldworkshot_layer, features)
         self.show_point()
 
         # update children with new point
@@ -125,6 +127,7 @@ class SamePointShotsDialog(QDialog, Ui_SamePointShotsDialog):
 
     def __init__(
         self,
+        fieldworkshot_layer: QgsVectorLayer,
         same_point_tolerance: float,
         groups: list[list[QgsFeature]],
         parent: Optional[QWidget] = None,
@@ -139,7 +142,7 @@ class SamePointShotsDialog(QDialog, Ui_SamePointShotsDialog):
         # setup rows
         items = []
         for group in groups:
-            parent_tree_item = ParentPointTreeWidgetItem(child_points=group)
+            parent_tree_item = ParentPointTreeWidgetItem(fieldworkshot_layer, child_points=group)
             items.append(parent_tree_item)
 
         self.tree_widget.addTopLevelItems(items)

@@ -1,9 +1,7 @@
 import string
 from uuid import uuid4
 
-from qgis.core import QgsFeature
-
-from fieldworkimport.helpers import get_layers_by_table_name
+from qgis.core import QgsFeature, QgsVectorLayer
 
 
 def parent_point_name(child_name: str):
@@ -14,12 +12,11 @@ def parent_point_name(child_name: str):
     return child_name[:-1] + chr(ord(child_name[-1]) + 1)
 
 
-def get_average_point(points: list[QgsFeature]) -> QgsFeature:  # noqa: D103, PLR0914
+def get_average_point(fieldworkshot_layer: QgsVectorLayer, points: list[QgsFeature]) -> QgsFeature:  # noqa: D103, PLR0914
     n = len(points)
 
-    layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
     f = QgsFeature(points[0])
-    fields = layer.fields()
+    fields = fieldworkshot_layer.fields()
     id_index = fields.indexFromName("id")
     name_index = fields.indexFromName("name")
     northing_index = fields.indexFromName("northing")

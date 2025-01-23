@@ -10,18 +10,20 @@ from qgis.core import (
     QgsCoordinateReferenceSystem,
     QgsCoordinateTransform,
     QgsFeature,
+    QgsMessageLog,
     QgsPoint,
     QgsProject,
+    QgsVectorLayer,
     QgsVectorLayerUtils,
 )
 from qgis.gui import QgisInterface
 from qgis.PyQt.QtWidgets import QDialog, QMessageBox
 from qgis.utils import iface as _iface
 
-from fieldworkimport.fwimport.parse_loc_file import parse_loc_file
-from fieldworkimport.fwimport.parse_ref_file import parse_ref_file
-from fieldworkimport.fwimport.parse_sum_file import parse_sum_file
-from fieldworkimport.helpers import AbortError, get_layers_by_table_name
+from fieldworkimport.exceptions import AbortError
+from fieldworkimport.fwcreate.parse_loc_file import parse_loc_file
+from fieldworkimport.fwcreate.parse_ref_file import parse_ref_file
+from fieldworkimport.fwcreate.parse_sum_file import parse_sum_file
 
 try:
     import rw5_to_csv
@@ -36,13 +38,12 @@ except ImportError:
 iface: QgisInterface = _iface  # type: ignore
 
 
-def warn_against_duplicate_imports(fieldwork_name: str) -> bool:
+def warn_against_duplicate_imports(fieldwork_layer: QgsVectorLayer, fieldwork_name: str) -> bool:
     """Check if another fieldwork with this name already exists.
 
     If so, warn against importing.
     Returns False if continue, True if user wants to abort.
     """  # noqa: DOC201
-    fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0]
     fieldwork_layer.selectByExpression(f"\"name\" = '{fieldwork_name}'")
     num_matches = fieldwork_layer.selectedFeatureCount()
     fieldwork_layer.removeSelection()
@@ -59,6 +60,8 @@ def warn_against_duplicate_imports(fieldwork_name: str) -> bool:
 
 
 def create_fieldwork(
+    fieldwork_layer: QgsVectorLayer,
+    fieldworkshot_layer: QgsVectorLayer,
     crdb_path: str,
     rw5_path: str,
     sum_path: Optional[str],  # noqa: FA100
@@ -66,10 +69,10 @@ def create_fieldwork(
     loc_path: Optional[str],  # noqa: FA100
     fieldrun_feature: Optional[QgsFeature],  # noqa: FA100
 ) -> QgsFeature:
+    QgsMessageLog.logMessage(
+        "Create fieldwork started.",
+    )
     timezone = pytz.timezone("America/Halifax")
-    fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0]
-    fieldwork_shot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
-
     loc_data = None
     sum_data = None
     ref_data = None
@@ -87,7 +90,7 @@ def create_fieldwork(
     rw5_prelude = rw5_to_csv.prelude(rw5_path=Path(rw5_path))
 
     # check if this has already been imported
-    if warn_against_duplicate_imports(rw5_prelude["JobName"]):
+    if warn_against_duplicate_imports(fieldwork_layer, rw5_prelude["JobName"]):
         # user chose to abort due to duplicate
         msg = "Aborting due to duplicate import."
         raise AbortError(msg)
@@ -146,7 +149,7 @@ def create_fieldwork(
 
     fieldwork_layer.addFeature(new_fieldwork)
 
-    fieldworkshot_layer_fields = fieldwork_shot_layer.fields()
+    fieldworkshot_layer_fields = fieldworkshot_layer.fields()
     fieldworkshot_layer_id_index = fieldworkshot_layer_fields.indexFromName("id")
     fieldworkshot_layer_fieldwork_id_index = fieldworkshot_layer_fields.indexFromName("fieldwork_id")
     fieldworkshot_layer_name_index = fieldworkshot_layer_fields.indexFromName("name")
@@ -171,7 +174,7 @@ def create_fieldwork(
     instrument_height_index = fieldworkshot_layer_fields.indexFromName("instrument_height")
     instrument_type_index = fieldworkshot_layer_fields.indexFromName("instrument_type")
 
-    fieldwork_shot_layer.startEditing()
+    fieldworkshot_layer.startEditing()
 
     for rw5_row in rw5_rows:
         crdb_query = cursor.execute("SELECT * FROM Coordinates WHERE P like ?", (rw5_row["PointID"].strip(),))
@@ -191,7 +194,7 @@ def create_fieldwork(
         geom = QgsPoint(x=crdb_row["E"], y=crdb_row["N"])
         geom.transform(transform)
 
-        new_fieldwork_shot = QgsVectorLayerUtils.createFeature(fieldwork_shot_layer)
+        new_fieldwork_shot = QgsVectorLayerUtils.createFeature(fieldworkshot_layer)
         new_fieldwork_shot[fieldworkshot_layer_id_index] = str(uuid4())
         new_fieldwork_shot[fieldworkshot_layer_fieldwork_id_index] = fieldwork_id
         if rw5_row["DateTime"]:
@@ -205,7 +208,7 @@ def create_fieldwork(
         new_fieldwork_shot[elevation_index] = crdb_row["Z"]
         new_fieldwork_shot[number_of_satellites_index] = rw5_row["NumSatellites"]
         new_fieldwork_shot[age_of_corrections_index] = rw5_row["Age"]
-        new_fieldwork_shot[status_index] = rw5_row["Status"]
+        new_fieldwork_shot[status_index] = rw5_row["Status"] or ""
         new_fieldwork_shot[HRMS_index] = rw5_row["HRMS"]
         new_fieldwork_shot[VRMS_index] = rw5_row["VRMS"]
         new_fieldwork_shot[PDOP_index] = rw5_row["PDOP"]
@@ -217,13 +220,13 @@ def create_fieldwork(
         new_fieldwork_shot[instrument_height_index] = rw5_row["InstrumentHeight"]
         new_fieldwork_shot[instrument_type_index] = rw5_row["InstrumentType"]
         new_fieldwork_shot.setGeometry(geom)
-        fieldwork_shot_layer.addFeature(new_fieldwork_shot)
+        fieldworkshot_layer.addFeature(new_fieldwork_shot)
 
     # zoom layer to new fieldwork points
-    iface.setActiveLayer(fieldwork_shot_layer)
-    fieldwork_shot_layer.selectByExpression(f'"fieldwork_id" = \'{fieldwork_id}\'')
+    iface.setActiveLayer(fieldworkshot_layer)
+    fieldworkshot_layer.selectByExpression(f'"fieldwork_id" = \'{fieldwork_id}\'')
     map_canvas = iface.mapCanvas()
     if map_canvas:
-        map_canvas.zoomToSelected(fieldwork_shot_layer)
+        map_canvas.zoomToSelected(fieldworkshot_layer)
 
     return new_fieldwork

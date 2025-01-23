@@ -1,0 +1,4 @@
+
+
+class AbortError(ValueError):
+    pass
