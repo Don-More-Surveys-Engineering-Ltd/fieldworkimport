@@ -3,7 +3,7 @@
     "valid_special_chars": "B,A,E,C,H,V,J",
     "parameterized_special_chars": "H,V",
     "control_point_codes": "MON,CP",
-    "same_point_tolerance": 0.15,
+    "same_point_tolerance": 0.075,
     "hrms_tolerance": 0.025,
     "vrms_tolerance": 0.05
 }

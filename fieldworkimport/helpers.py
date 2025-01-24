@@ -1,6 +1,7 @@
 from contextlib import contextmanager
+from typing import Any
 
-from qgis.core import QgsApplication, QgsAuthMethodConfig, QgsDataSourceUri, QgsVectorLayer
+from qgis.core import NULL, QgsApplication, QgsAuthMethodConfig, QgsDataSourceUri, QgsVectorLayer
 from qgis.PyQt.QtSql import QSqlDatabase
 
 
@@ -38,3 +39,7 @@ def layer_database_connection(layer: QgsVectorLayer):
         yield db
     finally:
         db.close()
+
+
+def not_NULL(val: Any) -> bool:  # noqa: ANN401, D103, N802
+    return not (val is None or val == NULL)

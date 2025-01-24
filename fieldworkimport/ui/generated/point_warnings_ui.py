@@ -14,6 +14,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 class Ui_PointWarningsDialog(object):
     def setupUi(self, PointWarningsDialog):
         PointWarningsDialog.setObjectName("PointWarningsDialog")
+        PointWarningsDialog.setWindowModality(QtCore.Qt.WindowModal)
         PointWarningsDialog.resize(563, 538)
         self.verticalLayout = QtWidgets.QVBoxLayout(PointWarningsDialog)
         self.verticalLayout.setObjectName("verticalLayout")

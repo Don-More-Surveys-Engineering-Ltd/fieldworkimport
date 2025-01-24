@@ -14,6 +14,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 class Ui_MatchControlPoints(object):
     def setupUi(self, MatchControlPoints):
         MatchControlPoints.setObjectName("MatchControlPoints")
+        MatchControlPoints.setWindowModality(QtCore.Qt.WindowModal)
         MatchControlPoints.resize(582, 690)
         self.verticalLayout = QtWidgets.QVBoxLayout(MatchControlPoints)
         self.verticalLayout.setObjectName("verticalLayout")
@@ -27,7 +28,7 @@ class Ui_MatchControlPoints(object):
         self.scrollArea.setWidgetResizable(True)
         self.scrollArea.setObjectName("scrollArea")
         self.scrollAreaContents = QtWidgets.QWidget()
-        self.scrollAreaContents.setGeometry(QtCore.QRect(0, 0, 562, 610))
+        self.scrollAreaContents.setGeometry(QtCore.QRect(0, 0, 562, 621))
         self.scrollAreaContents.setObjectName("scrollAreaContents")
         self.verticalLayout_4 = QtWidgets.QVBoxLayout(self.scrollAreaContents)
         self.verticalLayout_4.setObjectName("verticalLayout_4")

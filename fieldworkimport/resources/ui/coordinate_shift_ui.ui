@@ -2,12 +2,15 @@
 <ui version="4.0">
  <class>CoordinateShiftDialog</class>
  <widget class="QDialog" name="CoordinateShiftDialog">
+  <property name="windowModality">
+   <enum>Qt::WindowModal</enum>
+  </property>
   <property name="geometry">
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>742</width>
-    <height>452</height>
+    <width>736</width>
+    <height>436</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -21,28 +24,31 @@
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_3">
       <item>
-       <widget class="QRadioButton" name="radioButton">
+       <widget class="QRadioButton" name="no_shift_radio">
         <property name="text">
          <string>No Shift</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
         </property>
        </widget>
       </item>
       <item>
-       <widget class="QRadioButton" name="radioButton_2">
+       <widget class="QRadioButton" name="hpn_shift_radio">
         <property name="text">
          <string>HPN Shift</string>
         </property>
        </widget>
       </item>
       <item>
-       <widget class="QLabel" name="label">
+       <widget class="QLabel" name="hpn_shift_not_available_label">
         <property name="text">
          <string>HPN shift is not possible given the provided files. (Missing a file)</string>
         </property>
        </widget>
       </item>
       <item>
-       <widget class="QLabel" name="label_2">
+       <widget class="QLabel" name="hpn_shift_available_label">
         <property name="text">
          <string>HPN Shift was calculated to be ({{shift_x}}, {{shift_y}}, {{shift_z}}).</string>
         </property>
@@ -57,6 +63,12 @@
       </item>
       <item>
        <widget class="QTableWidget" name="control_shift_table">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Minimum">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
         <attribute name="horizontalHeaderStretchLastSection">
          <bool>true</bool>
         </attribute>

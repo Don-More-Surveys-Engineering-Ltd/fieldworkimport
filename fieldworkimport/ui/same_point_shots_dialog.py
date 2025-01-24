@@ -38,6 +38,7 @@ class ChildPointTreeWidgetItem(QTreeWidgetItem):
         residuals = calc_parent_child_residuals(parent_point=self.parent_point, child_point=self.point)
         cols = [
             self.point.attribute("name"),
+            self.point.attribute("description"),
             f"{self.point.attribute('northing'):.3f}",
             f"{self.point.attribute('easting'):.3f}",
             f"{self.point.attribute('elevation'):.3f}",
@@ -84,6 +85,7 @@ class ParentPointTreeWidgetItem(QTreeWidgetItem):
     def show_point(self):
         cols = [
             f"{self.parent_point.attribute('name')}/{self.parent_point.attribute('code')}",
+            self.parent_point.attribute("description"),
             f"{self.parent_point.attribute('northing'):.3f}",
             f"{self.parent_point.attribute('easting'):.3f}",
             f"{self.parent_point.attribute('elevation'):.3f}",
@@ -169,6 +171,9 @@ class SamePointShotsDialog(QDialog, Ui_SamePointShotsDialog):
             item = self.tree_widget.topLevelItem(i)
             if not isinstance(item, ParentPointTreeWidgetItem):
                 QgsMessageLog.logMessage("Expected only ParentPointTreeWidgetItems in top level items.", level=Qgis.MessageLevel.Critical)
+                continue
+            # skip unchecked parent points
+            if item.checkState(0) != QtCore.Qt.CheckState.Checked:
                 continue
             item = cast("ParentPointTreeWidgetItem", item)
             group = item.get_checked_child_points()

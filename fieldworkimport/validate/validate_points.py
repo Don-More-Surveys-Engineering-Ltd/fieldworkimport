@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from typing import Optional
 
-from qgis.core import QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVectorLayer
+from qgis.core import Qgis, QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVectorLayer
 from qgis.PyQt import QtWidgets
 
 from fieldworkimport.exceptions import AbortError
@@ -30,7 +30,9 @@ def validate_points(
     bad_code_flag_index = fields.indexFromName("bad_code_flag")
     points: list[QgsFeature] = [
         *fieldworkshot_layer.getFeatures(
-            QgsFeatureRequest().setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'"),
+            QgsFeatureRequest()
+            .setFilterExpression(f"\"fieldwork_id\" = '{fieldwork_id}'")
+            .setFlags(Qgis.FeatureRequestFlag.NoGeometry),
         ),  # type: ignore []
     ]
 

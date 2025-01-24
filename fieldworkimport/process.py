@@ -184,7 +184,7 @@ class FieldworkImportProcess:
 
             cs = CoordinateShiftStage(
                 layers=self.layers,
-                fieldwork_id=fieldwork_id,
+                fieldwork=self.fieldwork_feature,
                 fieldrun_id=fieldrun_id,
                 control_point_codes=self.control_point_codes,
             )

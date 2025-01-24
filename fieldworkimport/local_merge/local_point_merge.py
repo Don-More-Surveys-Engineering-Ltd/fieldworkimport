@@ -20,6 +20,8 @@ def should_be_averaged_together(
     control_point_codes: list[str],
 ) -> bool:
     """Return True if the two coords belong in an averaging group together."""  # noqa: DOC201
+    QgsMessageLog.logMessage(f"CMP: {p1.attribute('name')} -> {p2.attribute('name')}")
+
     p1_code = p1.attribute("code")
     p2_code = p2.attribute("code")
     p1_parent_point_id = p1.attribute("parent_point_id")
@@ -31,10 +33,13 @@ def should_be_averaged_together(
 
     # If already averaged (the user went back?) skip
     if p1_parent_point_id or p2_parent_point_id:
+        QgsMessageLog.logMessage("FAIL PARENT ID")
+
         return False
 
     # Same code
     if p1_code != p2_code:
+        QgsMessageLog.logMessage("FAIL CODE")
         return False
 
     # Within tolerance
@@ -51,8 +56,10 @@ def should_be_averaged_together(
         # if not control point, just use 2d calculations
         distance = math.sqrt((p2_easting - p1_easting) ** 2 + (p2_northing - p1_northing) ** 2)
 
-    if distance > same_point_tolerance:  # noqa: SIM103
+    if distance > same_point_tolerance:
+        QgsMessageLog.logMessage(f"FAIL TOLERANCE {distance=} {same_point_tolerance=}")
         return False
+    QgsMessageLog.logMessage("PASS")
     return True
 
 
@@ -64,7 +71,7 @@ def _group_consecutively(iterable: Iterable[_GC_T], comparator: Callable[[_GC_T,
 
         if pval is not None and not is_same_group and len(group) > 0:
             yield group
-            group = []
+            group = [val]
         else:
             group.append(val)
 
