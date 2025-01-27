@@ -21,9 +21,9 @@ from qgis.PyQt.QtWidgets import QDialog, QMessageBox
 from qgis.utils import iface as _iface
 
 from fieldworkimport.exceptions import AbortError
-from fieldworkimport.fwcreate.parse_loc_file import parse_loc_file
-from fieldworkimport.fwcreate.parse_ref_file import parse_ref_file
-from fieldworkimport.fwcreate.parse_sum_file import parse_sum_file
+from fieldworkimport.fwimport.parse_loc_file import parse_loc_file
+from fieldworkimport.fwimport.parse_ref_file import parse_ref_file
+from fieldworkimport.fwimport.parse_sum_file import parse_sum_file
 
 try:
     import rw5_to_csv

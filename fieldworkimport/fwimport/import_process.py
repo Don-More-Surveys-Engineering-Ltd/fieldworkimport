@@ -4,16 +4,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from qgis.core import QgsFeature, QgsProject, QgsVectorLayer
+from qgis.core import QgsFeature, QgsVectorLayer
 from qgis.gui import QgisInterface
 from qgis.utils import iface as _iface
 
 from fieldworkimport.exceptions import AbortError
-from fieldworkimport.frmatch.find_matches import FieldRunMatchStage
-from fieldworkimport.fwcreate.create_fieldwork import create_fieldwork
-from fieldworkimport.local_merge.local_point_merge import local_point_merge
-from fieldworkimport.shift.coordinate_shift import CoordinateShiftStage
-from fieldworkimport.validate.validate_points import correct_codes, show_warnings, validate_points
+from fieldworkimport.fwimport.stage_1_create_fieldwork import create_fieldwork
+from fieldworkimport.fwimport.stage_2_validate_points import correct_codes, show_warnings, validate_points
+from fieldworkimport.fwimport.stage_3_local_point_merge import local_point_merge
+from fieldworkimport.fwimport.stage_4_match_fieldrun import FieldRunMatchStage
+from fieldworkimport.fwimport.stage_5_coordinate_shift import CoordinateShiftStage
+from fieldworkimport.helpers import get_layers_by_table_name
 
 iface: QgisInterface = _iface  # type: ignore
 
@@ -36,6 +37,8 @@ class FieldworkImportLayers:
     controlpointdata_layer: QgsVectorLayer
     controlpointcoordinate_layer: QgsVectorLayer
     controlpointelevation_layer: QgsVectorLayer
+    coordsystem_layer: QgsVectorLayer
+    elevationsystem_layer: QgsVectorLayer
 
 
 class FieldworkImportProcess:
@@ -98,6 +101,8 @@ class FieldworkImportProcess:
         controlpointdata_layer = self.create_working_layer("sites_controlpointdata")
         controlpointelevation_layer = self.create_working_layer("sites_controlpointelevation")
         controlpointcoordinate_layer = self.create_working_layer("sites_controlpointcoordinate")
+        coordsystem_layer = self.create_working_layer("sites_coordsystem")
+        eleavtionsystem_layer = self.create_working_layer("sites_elevationsystem")
 
         self.layers = FieldworkImportLayers(
             fieldwork_layer=fieldwork_layer,
@@ -106,6 +111,8 @@ class FieldworkImportProcess:
             controlpointdata_layer=controlpointdata_layer,
             controlpointcoordinate_layer=controlpointcoordinate_layer,
             controlpointelevation_layer=controlpointelevation_layer,
+            coordsystem_layer=coordsystem_layer,
+            elevationsystem_layer=eleavtionsystem_layer,
         )
 
     def rollback(self):
@@ -176,12 +183,6 @@ class FieldworkImportProcess:
             )
             mm.run()
 
-            # need to commit so that changes are available to sql query in next stage
-            # TODO: Use QgsTransacation to avoid this
-            self.layers.fieldwork_layer.commitChanges(stopEditing=False)
-            self.layers.fieldrunshot_layer.commitChanges(stopEditing=False)
-            self.layers.fieldworkshot_layer.commitChanges(stopEditing=False)
-
             cs = CoordinateShiftStage(
                 layers=self.layers,
                 fieldwork=self.fieldwork_feature,
@@ -189,49 +190,24 @@ class FieldworkImportProcess:
                 control_point_codes=self.control_point_codes,
             )
             cs.run()
+
+            self.mark_shots_as_processed()
+
         except AbortError:
             self.rollback()
             raise
 
+    def mark_shots_as_processed(self):
+        """Set is_processed to true on all points to show processing has completed."""
+        fields = self.layers.fieldworkshot_layer.fields()
+        is_processed_idx = fields.indexFromName("is_processed")
+        points: list[QgsFeature] = [*self.layers.fieldworkshot_layer.getFeatures(
+            f"fieldwork_id = '{self.fieldwork_feature.attribute('id')}'",
+        )]  # type: ignore []
+        for point in points:
+            point[is_processed_idx] = True
+            self.layers.fieldworkshot_layer.updateFeature(point)
+
     def create_working_layer(self, table_name: str):
         # get layer know will be present
-        og_layer = self.get_layers_by_table_name("public", table_name, raise_exception=True, no_filter=True)[0]
-
-        # layer = QgsVectorLayer(og_layer.source(), og_layer.name(), og_layer.providerType())
-        # # remove filter if filtered
-        # layer.setSubsetString(None)
-
-        # prj = QgsProject.instance()
-        # assert prj
-        # prj.addMapLayer(layer, False)
-
-        # root = prj.layerTreeRoot()
-        # assert root
-        # group = root.findGroup(self.group_name)
-        # if not group:
-        #     group = root.addGroup(self.group_name)
-        # assert group
-        # group.addLayer(layer)
-        # return layer
-        return og_layer
-
-    @staticmethod
-    def get_layers_by_table_name(schema: str, table_name: str, *, no_filter: bool = False, raise_exception: bool = False) -> list[QgsVectorLayer]:
-        layers_dict: dict[str, QgsVectorLayer] = QgsProject.instance().mapLayers()  # type: ignore
-        layers_list = layers_dict.values()
-
-        matches = []
-
-        src_snippet = f'table="{schema}"."{table_name}"'
-
-        for layer in layers_list:
-            if no_filter and layer.subsetString():
-                continue
-            src_str = layer.source()
-            if src_snippet in src_str:
-                matches.append(layer)
-
-        if not matches and raise_exception:
-            msg = f"Could not find layer with table '{schema}'.'{table_name}'."
-            raise ValueError(msg)
-        return matches
+        return get_layers_by_table_name("public", table_name, raise_exception=True, no_filter=True)[0]

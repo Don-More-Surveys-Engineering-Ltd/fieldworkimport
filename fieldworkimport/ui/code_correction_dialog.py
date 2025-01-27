@@ -2,8 +2,8 @@ from typing import Optional
 
 from PyQt5.QtWidgets import QDialog, QMessageBox, QWidget
 
+from fieldworkimport.fwimport.validate_code import validate_code
 from fieldworkimport.ui.generated.code_correction_ui import Ui_CodeCorrectionDialog
-from fieldworkimport.validate.validate_code import validate_code
 
 
 class CodeCorrectionDialog(QDialog, Ui_CodeCorrectionDialog):

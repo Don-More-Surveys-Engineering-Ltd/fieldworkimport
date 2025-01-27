@@ -3,13 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from qgis.core import QgsFeature, QgsMessageLog
-from qgis.PyQt.QtSql import QSqlQuery
 
-from fieldworkimport.helpers import layer_database_connection
+from fieldworkimport.helpers import not_NULL
 from fieldworkimport.ui.coordinate_shift_dialog import CoordinateShiftDialog, CoordinateShiftDialogResult
 
 if TYPE_CHECKING:
-    from fieldworkimport.process import FieldworkImportLayers
+    from fieldworkimport.fwimport.import_process import FieldworkImportLayers
 
 
 class CoordinateShiftStage:
@@ -43,59 +42,50 @@ class CoordinateShiftStage:
         hpn_shift = self.calculate_hpn_shift()
         dialog = CoordinateShiftDialog(hpn_shift=hpn_shift)
 
-        # get suitable controls for shift, and add them w/ their shifts to the dialog
-        with layer_database_connection(self.layers.fieldrunshot_layer) as db:
-            query = QSqlQuery(db)
-            # get the fieldwork shots that have fieldrun shots, are controls, and the matching fieldrun shots
-            # have primary coords. Do this with a QUADRUPLE join, that:
-            # - starts with fieldworkshots table
-            # - joins matching fieldrun shots
-            # - joins the fieldrun shot's controlpointdata
-            # - joins the controlpointdata's primary coord
-            # - joins the controlpointdata's primary elevation IF it exists (LEFT join)
-            # WHERE the fieldworkshots are from the current fieldwork, and the code is a control point code CP or MON.
-            sql = f"""
-            SELECT fws.id, frs.id, (cpc.east - fws.easting) as diff_east, (cpc.north - fws.northing) as diff_north, (cpe.elev - fws.elevation) as diff_elev
-                FROM "public"."sites_fieldworkshot" as fws
-                INNER JOIN "public"."sites_fieldrunshot" as frs
-                    ON fws.matching_fieldrun_shot_id = frs.id
-                INNER JOIN "public"."sites_controlpointdata" as cpd
-                    ON frs.id = cpd.fieldrun_shot_id
-                INNER JOIN "public"."sites_controlpointcoordinate" as cpc
-                    ON cpd.primary_coord_id = cpc.id
-                LEFT JOIN "public"."sites_controlpointelevation" as cpe
-                    ON cpd.primary_elevation_id = cpe.id
-                WHERE
-                    -- from this fieldwork set
-                    fws.fieldwork_id = '{self.fieldwork.attribute('id')}' AND
-                    -- fieldworkshot is a control
-                    fws.code in ({cp_code_clause})
-            """  # noqa: S608
+        points: list[QgsFeature] = [*self.layers.fieldworkshot_layer.getFeatures(
+            f"""
+            fieldwork_id = '{self.fieldwork.attribute('id')}' AND
+            code in ({cp_code_clause}) AND
+            matching_fieldrun_shot_id is not null
+            """,
+        )]  # type: ignore []
 
-            if query.exec(sql):
-                # Fetch the results
-                while query.next():
-                    fieldworkshot_id = query.value(0)
-                    fieldrunshot_id = query.value(1)
-                    fieldworkshot = next(self.layers.fieldworkshot_layer.getFeatures(f"\"id\"='{fieldworkshot_id}'"))
-                    fieldrunshot = next(self.layers.fieldrunshot_layer.getFeatures(f"\"id\"='{fieldrunshot_id}'"))
-                    diff_east: float = query.value(2)
-                    diff_north: float = query.value(3)
-                    diff_elev: float | None = query.value(4)
-                    QgsMessageLog.logMessage(
-                        f"{fieldworkshot_id}/{fieldrunshot_id}/{diff_east=}/{diff_north=}/{diff_elev=}",
-                    )
+        QgsMessageLog.logMessage(f"""
+            fieldwork_id = '{self.fieldwork.attribute('id')}' AND
+            code in ({cp_code_clause}) AND
+            matching_fieldrun_shot_id is not null
+            """)
 
-                    # add match / shift to dialog
-                    dialog.add_shift_row(
-                        fieldworkshot,
-                        fieldrunshot,
-                        (diff_east, diff_north, diff_elev),
-                    )
-            else:
-                QgsMessageLog.logMessage(
-                    f"Failed: {db.lastError().text()}",
-                )
+        for fieldworkshot in points:
+            fieldrunshot = next(self.layers.fieldrunshot_layer.getFeatures(f"id = '{fieldworkshot.attribute('matching_fieldrun_shot_id')}'"))  # noqa: E501
+            controlpointdata = next(self.layers.controlpointdata_layer.getFeatures(f"fieldrun_shot_id = '{fieldrunshot.attribute('id')}'"), None)  # noqa: E501
+            if not controlpointdata:
+                msg = "Matched fieldrunshot has no controlpoint data."
+                raise ValueError(msg)
+            primary_coord_id = controlpointdata.attribute("primary_coord_id")
+            primary_coord = self.layers.controlpointcoordinate_layer.getFeature(primary_coord_id)
+            primary_elevation_id = controlpointdata.attribute("primary_elevation_id")
+            primary_elevation = None
+            if not_NULL(primary_elevation_id):
+                primary_elevation = self.layers.controlpointelevation_layer.getFeature(primary_elevation_id)
+
+            published_easting = primary_coord.attribute("east")
+            published_northing = primary_coord.attribute("north")
+            published_elevation = None
+            if primary_elevation:
+                published_elevation = primary_elevation.attribute("elev")
+
+            measured_easting = fieldworkshot.attribute("easting")
+            measured_northing = fieldworkshot.attribute("northing")
+            measured_elevation = fieldworkshot.attribute("elevation")
+
+            shift = (published_easting - measured_easting, published_northing - measured_northing, (published_elevation - measured_elevation) if published_elevation else None)
+            dialog.add_shift_row(
+                fieldworkshot,
+                fieldrunshot,
+                shift,
+            )
+
         # done adding matches / shifts, tell dialog to add the average shift row
         dialog.add_avg_row()
         # show and wait for dialog

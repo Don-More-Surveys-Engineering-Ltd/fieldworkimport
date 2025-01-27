@@ -9,12 +9,14 @@ from qgis.gui import QgisInterface
 from qgis.PyQt.QtGui import QIcon
 from qgis.utils import iface as _iface
 
-from fieldworkimport.process import FieldworkImportProcess
+from fieldworkimport.controlpublish.publish_controls_dialog import PublishControlsDialog
+from fieldworkimport.fwimport.import_process import FieldworkImportProcess
+from fieldworkimport.ui.import_finished_dialog import ImportFinishedDialog
 
 iface: QgisInterface = _iface  # type: ignore
 
 from fieldworkimport.exceptions import AbortError
-from fieldworkimport.ui.new_form_dialog import ImportFieldworkDialog
+from fieldworkimport.ui.import_dialog import ImportFieldworkDialog
 
 
 class Plugin:
@@ -104,9 +106,16 @@ class Plugin:
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
         self.setup_settings()
         self.add_action(
+            str(Path(__file__).parent / "resources" / "icons" / "noun-geodesy-7254004.svg"),
+            text="Import Fieldwork",
+            callback=self.start_import,
+            parent=iface.mainWindow(),
+            add_to_toolbar=True,
+        )
+        self.add_action(
             "",
-            text=Plugin.name,
-            callback=self.run,
+            text="Find and Publish Controls",
+            callback=self.start_publish_controls,
             parent=iface.mainWindow(),
             add_to_toolbar=False,
         )
@@ -172,10 +181,26 @@ class Plugin:
             iface.messageBar().pushMessage("Import Aborted", e.args[0], level=Qgis.MessageLevel.Critical)  # type: ignore
             return
 
-        iface.messageBar().pushMessage("Import Finished", "Now look over your work and save changes when you're ready.", level=Qgis.MessageLevel.Success, duration=60)  # type: ignore
+        import_finished_dialog = ImportFinishedDialog()
+        return_code = import_finished_dialog.exec_()
 
-    def run(self) -> None:
+        if return_code == ImportFinishedDialog.Rejected:
+            fwimport.rollback()
+        else:
+            fwimport.layers.fieldwork_layer.commitChanges()
+            fwimport.layers.fieldworkshot_layer.commitChanges()
+
+        if import_finished_dialog.next_publish_controls_checkbox.isChecked():
+            self.start_publish_controls(fwimport.fieldwork_feature)
+        if import_finished_dialog.next_create_report_checkbox.isChecked():
+            pass  # TODO: Create report
+
+    def start_import(self) -> None:
         """Run method that performs all the real work."""
         self.import_dialog = self._setup_import_dialog()
         self.import_dialog.show()
         self.import_dialog.accepted.connect(self._on_accept_new_form)
+
+    def start_publish_controls(self, *args, default_fieldwork: QgsFeature | None = None):
+        dialog = PublishControlsDialog(default_fieldwork)
+        dialog.exec_()

@@ -125,7 +125,7 @@ class CoordinateShiftDialog(QDialog, Ui_CoordinateShiftDialog):
         )
         self.control_shift_table.setItem(index, 1, QTableWidgetItem(fieldrun_shot.attribute("name")))
         self.control_shift_table.setItem(index, 2, QTableWidgetItem(fieldwork_shot.attribute("name")))
-        self.control_shift_table.setItem(index, 3, QTableWidgetItem(f"{shift[0]:.3f}, {shift[1]:.3f}, {round(shift[2], 3) if not_NULL(shift[2]) else 'N/A'}"))
+        self.control_shift_table.setItem(index, 3, QTableWidgetItem(f"{shift[0]:.3f}, {shift[1]:.3f}, {round(shift[2], 3) if not_NULL(shift[2]) else 'N/A'}"))  # type: ignore
 
         for i in range(self.control_shift_table.columnCount()):
             self.control_shift_table.resizeColumnToContents(i)
@@ -193,7 +193,7 @@ class CoordinateShiftDialog(QDialog, Ui_CoordinateShiftDialog):
             self.control_shift_table.setItem(
                 index,
                 4,
-                QTableWidgetItem(f"{residual[0]:.3f}, {residual[1]:.3f}, {round(residual[2], 3) if not_NULL(residual[2]) else 'N/A'}"),
+                QTableWidgetItem(f"{residual[0]:.3f}, {residual[1]:.3f}, {round(residual[2], 3) if not_NULL(residual[2]) else 'N/A'}"),  # type: ignore
             )
 
     def get_result(self) -> CoordinateShiftDialogResult:

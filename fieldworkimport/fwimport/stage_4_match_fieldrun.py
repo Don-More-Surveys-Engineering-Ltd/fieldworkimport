@@ -1,13 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from qgis.core import (
-    Qgis,
-    QgsFeature,
-    QgsFeatureRequest,
-    QgsMessageLog,
-    QgsVectorLayerUtils,
-)
+from qgis.core import Qgis, QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVectorLayerUtils
 from qgis.PyQt.QtSql import QSqlQuery
 
 from fieldworkimport.helpers import layer_database_connection
@@ -15,7 +9,7 @@ from fieldworkimport.ui.match_control_item import MatchControlItem
 from fieldworkimport.ui.match_to_controls_dialog import MatchToControlsDialog
 
 if TYPE_CHECKING:
-    from fieldworkimport.process import FieldworkImportLayers
+    from fieldworkimport.fwimport.import_process import FieldworkImportLayers
 
 
 class FieldRunMatchStage:
@@ -50,17 +44,23 @@ class FieldRunMatchStage:
             self.match_on_name()
 
     def create_fieldrun_control_shot(self, name: str, based_on_fieldwork_shot: QgsFeature) -> QgsFeature:
-        new_control = QgsVectorLayerUtils.createFeature(self.layers.fieldrunshot_layer)
+        new_fieldrunshot = QgsVectorLayerUtils.createFeature(self.layers.fieldrunshot_layer)
         fields = self.layers.fieldrunshot_layer.fields()
-        new_control[fields.indexFromName("id")] = str(uuid4())
-        new_control[fields.indexFromName("name")] = name
-        new_control[fields.indexFromName("type")] = "Control"
-        new_control[fields.indexFromName("field_run_id")] = self.fieldrun_id
-        new_control[fields.indexFromName("description")] = f"[Genrated to match shot {based_on_fieldwork_shot.attribute('name')}]"
-        new_control.setGeometry(based_on_fieldwork_shot.geometry())
+        new_fieldrunshot[fields.indexFromName("id")] = str(uuid4())
+        new_fieldrunshot[fields.indexFromName("name")] = name
+        new_fieldrunshot[fields.indexFromName("type")] = "Control"
+        new_fieldrunshot[fields.indexFromName("field_run_id")] = self.fieldrun_id
+        new_fieldrunshot[fields.indexFromName("description")] = f"[Generated to match shot {based_on_fieldwork_shot.attribute('name')}]"
+        new_fieldrunshot.setGeometry(based_on_fieldwork_shot.geometry())
 
-        self.layers.fieldrunshot_layer.addFeature(new_control)
-        return new_control
+        self.layers.fieldrunshot_layer.addFeature(new_fieldrunshot)
+
+        new_controlpointdata = QgsVectorLayerUtils.createFeature(self.layers.controlpointdata_layer)
+        cpd_fields = self.layers.controlpointdata_layer.fields()
+        new_controlpointdata[cpd_fields.indexFromName("fieldrun_shot_id")] = new_fieldrunshot.attribute("id")
+        self.layers.controlpointdata_layer.addFeature(new_controlpointdata)
+
+        return new_fieldrunshot
 
     def assign_fr_shot(self, fw_shot: QgsFeature, fr_shot_id: str) -> None:
         """Assign fieldrun show as match for fieldwork shot, and that shot's ancestors."""
@@ -141,6 +141,9 @@ class FieldRunMatchStage:
                         -- fieldrunshot is a control
                         AND type like 'Control'
                 """  # noqa: S608
+                query.prepare(sql)
+                query.setForwardOnly(True)
+
                 feature_ids = []
                 if query.exec(sql):
                     # Fetch the results

@@ -9,7 +9,7 @@ from fieldworkimport.exceptions import AbortError
 from fieldworkimport.ui.generated.match_control_item import Ui_match_control_item
 
 if TYPE_CHECKING:
-    from fieldworkimport.process import FieldworkImportLayers
+    from fieldworkimport.fwimport.import_process import FieldworkImportLayers
 
 
 @dataclass

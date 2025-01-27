@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from typing import Any
 
-from qgis.core import NULL, QgsApplication, QgsAuthMethodConfig, QgsDataSourceUri, QgsVectorLayer
+from qgis.core import NULL, QgsApplication, QgsAuthMethodConfig, QgsDataSourceUri, QgsProject, QgsVectorLayer
 from qgis.PyQt.QtSql import QSqlDatabase
 
 
@@ -43,3 +43,24 @@ def layer_database_connection(layer: QgsVectorLayer):
 
 def not_NULL(val: Any) -> bool:  # noqa: ANN401, D103, N802
     return not (val is None or val == NULL)
+
+
+def get_layers_by_table_name(schema: str, table_name: str, *, no_filter: bool = False, raise_exception: bool = False) -> list[QgsVectorLayer]:
+    layers_dict: dict[str, QgsVectorLayer] = QgsProject.instance().mapLayers()  # type: ignore
+    layers_list = layers_dict.values()
+
+    matches = []
+
+    src_snippet = f'table="{schema}"."{table_name}"'
+
+    for layer in layers_list:
+        if no_filter and layer.subsetString():
+            continue
+        src_str = layer.source()
+        if src_snippet in src_str:
+            matches.append(layer)
+
+    if not matches and raise_exception:
+        msg = f"Could not find layer with table '{schema}'.'{table_name}'."
+        raise ValueError(msg)
+    return matches

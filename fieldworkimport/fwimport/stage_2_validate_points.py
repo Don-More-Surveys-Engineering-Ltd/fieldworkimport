@@ -5,10 +5,10 @@ from qgis.core import Qgis, QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVec
 from qgis.PyQt import QtWidgets
 
 from fieldworkimport.exceptions import AbortError
+from fieldworkimport.fwimport.validate_code import validate_code
 from fieldworkimport.ui.code_correction_dialog import CodeCorrectionDialog
 from fieldworkimport.ui.point_warning_item import PointWarningItem
 from fieldworkimport.ui.point_warnings_dialog import PointWarningsDialog
-from fieldworkimport.validate.validate_code import validate_code
 
 
 def validate_points(

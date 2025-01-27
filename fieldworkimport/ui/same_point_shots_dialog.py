@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import QDialog, QTreeWidgetItem, QWidget
 from qgis.core import Qgis, QgsFeature, QgsMessageLog, QgsVectorLayer
 from qgis.PyQt import QtCore, QtGui
 
-from fieldworkimport.local_merge.helpers import calc_parent_child_residuals, get_average_point
+from fieldworkimport.fwimport.merge_helpers import calc_parent_child_residuals, get_average_point
 from fieldworkimport.ui.generated.same_point_shots_ui import Ui_SamePointShotsDialog
 
 PARENT_POINT_TREE_WIDGET_FONT = QtGui.QFont()

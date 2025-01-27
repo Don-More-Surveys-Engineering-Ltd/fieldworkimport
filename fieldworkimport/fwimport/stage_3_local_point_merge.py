@@ -7,7 +7,7 @@ from typing import Any, Callable, Optional, TypeVar
 from qgis.core import QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVectorLayer
 
 from fieldworkimport.exceptions import AbortError
-from fieldworkimport.local_merge.helpers import get_average_point
+from fieldworkimport.fwimport.merge_helpers import get_average_point
 from fieldworkimport.ui.same_point_shots_dialog import SamePointShotsDialog
 
 _GC_T = TypeVar("_GC_T")
