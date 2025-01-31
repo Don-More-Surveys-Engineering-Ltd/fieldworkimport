@@ -1,0 +1,631 @@
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<!-- Latex stylesheet docs: https://latex.vercel.app/ -->
+	<link rel="stylesheet" href="https://latex.vercel.app/style.css">
+	<link rel="stylesheet" href="https://latex.vercel.app/prism/prism.css">
+	<title>Final Fieldwork Report</title>
+	<style>
+		@media print {
+			body {
+				zoom: 80%;
+				background-color: white;
+				font-size: .9rem;
+			}
+
+			pre {
+				background-color: white;
+			}
+
+			@page {
+				size: Letter;
+			}
+
+			table {
+				font-size: .9rem !important;
+			}
+
+			section.page {
+				page-break-before: always;
+			}
+
+			/* page-break-after works, as well */
+
+		}
+
+		.text-error {
+			color: rgb(121, 30, 30);
+			font-weight: 600;
+		}
+
+		section {
+			counter-reset: point-header;
+		}
+
+		.fieldrun-point-header::before {
+			counter-increment: point-header;
+			content: 'Point ' counter(point-header) ': ';
+		}
+
+		span.mark {
+			color: rgb(223, 0, 0);
+			font-weight: 600 !important;
+			text-decoration: underline;
+		}
+
+		#final-coord-table td {
+			vertical-align: top;
+		}
+	</style>
+</head>
+
+{% set LOC_FILE_USED = not nullish(fw.attribute("LOC_grid_easting")) %}
+
+<body>
+	<header>
+		<div>
+			<img src="{{ header_b64 }}" alt="DMSE Logo"
+				style="width: 6cm; display:block; margin:auto;">
+		</div>
+		<h2 style="text-align: center;">Fieldwork Processing Results</h2>
+	</header>
+	<div class="abstract">
+		{% if job_number %}
+		<p><b>Job:</b> {{ job_number }}</p>
+		{% endif %}
+		{% if client_name %}
+		<p><b>Client:</b> {{ client_name }}</p>
+		{% endif %}
+		<p style="margin-top: 0.75cm;"><b>Fieldwork:</b> {{fw|attr('name')}}</p>
+		{% set dt_str = fw.attribute("RW5_datetime") %}
+		{% if not nullish(dt_str) %}
+		{% set dt = dt_str.toPyDateTime() %}
+		<p><b>Date of Fieldwork:</b> {{dt.strftime("%B %d, %Y")}}</p>
+		{% endif %}
+		<p style="white-space: pre-line;"><b>Equipment:</b> {{fw|attr('equipment_string')}}</p>
+		<p style="margin-top: 0.75cm;">Shots:</p>
+		<p>{{shots_summary_str}}</p>
+		<p>Observed Controls:</p>
+		<p>{{observed_controls_summary_str}}</p>
+		<p>New Controls:</p>
+		<p>{{new_controls_summary_str or "N/A"}}</p>
+		{% if DETAILED_REPORT %}
+		<p style="margin-top: 0.75cm;">Generated from:</p>
+		<p><small><code>{{crdb_name}}</code></small></p>
+		<p><small><code>{{rw5_name}}</code></small></p>
+		<p><small><code>{{ref_name}}</code></small></p>
+		<p><small><code>{{loc_name}}</code></small></p>
+		<p><small><code>{{sum_name}}</code></small></p>
+		{% endif %}
+		<p>Date generated: {{ datetime.now().strftime("%B %d, %Y") }}</p>
+	</div>
+	<section class="page">
+		<h2>Contents</h2>
+		<nav>
+			<ol>
+				<li><a href="#control-summary">Control Summary</a>
+					<ol>
+						<li><a href="#coordinate-shift">Coordinate Shift</a></li>
+						<li><a href="#localization">Localization</a></li>
+						<li><a href="#observed-controls">Observed Controls</a></li>
+						<li><a href="#new-controls">New Controls</a></li>
+					</ol>
+				</li>
+
+				<li><a href="#processing-summary">Processing Summary</a>
+					<ol>
+						<li><a href="#averaged-points">Averaged Points</a></li>
+						<li><a href="#exceptions">Exceptions</a>
+							<ol>
+								<li><a href="#code-exceptions">Code Exceptions</a></li>
+								<li><a href="#quality-exceptions">Quality Exceptions</a></li>
+							</ol>
+						</li>
+					</ol>
+				</li>
+				<li><a href="#field-run-summary">Field Run Summary</a></li>
+				<li><a href="#final-coords">Final Coords</a></li>
+				{% if DETAILED_REPORT %}
+				<li><a href="#raw-data">Raw Data</a>
+					<ol>
+						<li><a href="#crdb-file">CRDB File</a></li>
+						<li><a href="#rw5-file">RW5 File</a></li>
+						<li><a href="#ref-file">REF File</a></li>
+						<li><a href="#loc-file">LOC File</a></li>
+						<li><a href="#sum-file">SUM File</a></li>
+					</ol>
+				</li>
+				{% endif %}
+			</ol>
+		</nav>
+	</section>
+
+</body>
+<main>
+	<article>
+
+		<section class="page">
+			<h2 id="control-summary">Control Summary</h2>
+			<section>
+				<h3 id="coordinate-summary">Coordinate Shift</h3>
+				{% set shift_type = fw|attr("shift_type")%}
+				{% if shift_type == "NONE" %}
+				<p>
+					No shift was applied to the coordinates in this fieldwork.
+				</p>
+				{% else %}
+				<p>
+					{% if shift_type == "CONTROL" %}
+					<!-- Control shift -->
+					A control point shift was applied to the coordinates in this fieldwork.
+					The shift was calculated as the difference between the following known control points
+					and their corrosponding shots captured in this fieldwork:
+					<ul>
+					{% for i in coordinate_shift.shift_controls %}
+						<li>
+							{{ i.fr_shot|attr("name") }}
+						</li>
+					{% endfor %}
+					</ul>
+					{% elif shift_type == "HPN" %}
+					<!-- HPN shift -->
+					A HPN shift was calculated and applied to the coordinates in this fieldwork.
+					The shift was calculated factoring in the reference coordinate,
+					the coordinate and geoid seperation values found in the summary file from
+					NRCAN{% if LOC_FILE_USED %}, and the measured/grid coordinates that can be found in the
+					localization file{% endif %}.
+					{% endif %}
+					<br>
+					The applied shift is as follows:
+					<ul>
+						<li>East {{fw|attr("easting_shift")|round(3)}}m</li>
+						<li>North {{fw|attr("northing_shift")|round(3)}}m</li>
+						<li>Elevation {{fw|attr("elevation_shift")|round(3)}}m</li>
+					</ul>
+				</p>
+				{% endif %}
+			</section>
+			{# <section>
+				<h3 id="localization">Localization</h3>
+				{% if LOC_FILE_USED %}
+				<p>
+					The fieldwork was localized to the point described as <b>{{fw|attr("LOC_description")}}</b>,
+					which was measured in the field to have the following coordinate:
+				</p>
+				{# <pre><code>({{parsed_loc_file.grid_point.0|floatformat:4}}, {{parsed_loc_file.grid_point.1|floatformat:4}}, {{parsed_loc_file.grid_point.2|floatformat:4}})</code></pre> #}
+				<p>
+					The known (grid) coordinate for the same point is:
+				</p>
+				{# <pre><code>({{parsed_loc_file.measured_point.0|floatformat:4}}, {{parsed_loc_file.measured_point.1|floatformat:4}}, {{parsed_loc_file.measured_point.2|floatformat:4}})</code></pre> #}
+				<p>The residuals (grid - measured coordinates) is as follows:</p>
+				{# <pre><code>({{parsed_loc_file.residuals.0|floatformat:4}}, {{parsed_loc_file.residuals.1|floatformat:4}}, {{parsed_loc_file.residuals.2|floatformat:4}})</code></pre> #}
+				{% else %}
+				<p>No LOC file was provided for this fieldwork.</p>
+				{% endif %}
+			</section>
+			<section>
+				<h3 id="observed-controls">Observed Controls</h3>
+				<table>
+					<tbody>
+						<tr>
+							<th scope="col">Name</th>
+							<th scope="col">Existing</th>
+							<th scope="col">Observed</th>
+							<th scope="col">Residual</th>
+						</tr>
+						{% for control in fw.existing_controls %}
+						<tr>
+							<th scope="row">{{control.matched_survey_point.name}}</th>
+							<td>
+								<div>
+									{{control.matched_survey_point.control_point_data.primary_coord.east}}<br>
+									{{control.matched_survey_point.control_point_data.primary_coord.north}}<br>
+									{{control.matched_survey_point.control_point_data.primary_elevation.elev}}
+								</div>
+							</td>
+							<td>
+								<div>
+									{# {{control.E|floatformat:3}}<br>
+									{{control.N|floatformat:3}}<br>
+									{{control.Z|floatformat:3}} #}
+								</div>
+							</td>
+							<td>
+								{# {{control.control_point_residuals.0|floatformat:3}}<br>
+								{{control.control_point_residuals.1|floatformat:3}}<br>
+								{{control.control_point_residuals.2|floatformat:3}} #}
+							</td>
+						</tr>
+						{% endfor %}
+					</tbody>
+				</table>
+			</section>
+			<section>
+				<h3 id="new-controls">New Controls</h3>
+				<table>
+					<tbody>
+						<tr>
+							<th scope="col">Name</th>
+							<th scope="col">Observed</th>
+						</tr>
+						{% for control in fw.existing_controls %}
+						<tr>
+							<th scope="row">{{control.matched_survey_point.name}}</th>
+							<td>
+								<div>
+									{# {{control.E|floatformat:3}}<br>
+									{{control.N|floatformat:3}}<br>
+									{{control.Z|floatformat:3}} #}
+								</div>
+							</td>
+						</tr>
+						{% endfor %}
+					</tbody>
+				</table>
+			</section> #}
+		</section>
+		{# <section class="page">
+			<h2 id="processing-summary">Processing Summary</h2>
+			<section>
+				<h3 id="averaged-points">Averaged Points</h3>
+				<p>The following tables each represent points that were created as averages of other continuous,
+					same-code, and within same-shot tolerance ({{ settings.same_point_tolerance }}m) points.</p>
+
+				{% for avg_point in fw.points.all %}
+				{% if avg_point.averaged_from.exists %}
+				<table style="margin-top: .75cm;">
+					{% if avg_point.matched_survey_point %}
+					<caption>
+						The points that were averaged into <em>control point</em>
+						<b>{{avg_point.matched_survey_point.name}}</b>.
+					</caption>
+					{% else %}
+					<caption>
+						The points that were averaged into <b>{{avg_point.P}}</b>.
+					</caption>
+					{% endif %}
+					<thead>
+						<tr>
+							<th>Point</th>
+							<th>Code</th>
+							<th>East</th>
+							<th>North</th>
+							<th>Elevation</th>
+							<th>Residuals</th>
+						</tr>
+					</thead>
+					<tbody>
+						{% for point in avg_point.averaged_from.all %}
+						<tr>
+							<td>{{point.P}}</td>
+							<td>{{point.final_code}}</td>
+							{# <td>{{point.E|floatformat:3}}</td>
+							<td>{{point.N|floatformat:3}}</td>
+							<td>{{point.Z|floatformat:3}}</td> #}
+							<td>
+								<div>
+									{# {{point.residuals_from_avg.0|floatformat:3}},
+									{{point.residuals_from_avg.1|floatformat:3}},
+									{{point.residuals_from_avg.2|floatformat:3}} #}
+								</div>
+							</td>
+						</tr>
+						{% endfor %}
+					</tbody>
+					<tfoot>
+						<tr>
+							<th>{{avg_point.P}}</th>
+							<th>{{avg_point.final_code}}</th>
+							{# <th>{{avg_point.E|floatformat:3}}</th>
+							<th>{{avg_point.N|floatformat:3}}</th>
+							<th>{{avg_point.Z|floatformat:3}}</th> #}
+							<th></th>
+						</tr>
+					</tfoot>
+				</table>
+				{% endif %}
+				{% endfor %}
+			</section>
+			<section>
+				<h3 id="exceptions">Exceptions</h3>
+				<section>
+					<h4 id="code-exceptions">Code Exceptions</h4>
+					<p>The following points were flagged as having an invalid code, and presented to the operator
+						with the option to correct the code.</p>
+					<table>
+						<thead>
+							<tr>
+								<th>Point</th>
+								<th>Code</th>
+								<th>Action Taken</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for point in fw.points.all %}
+							{% if point.bad_code %}
+							<tr>
+								<th scope="row">{{point.P}}</th>
+								<td>{{point.code}}</td>
+								<td>
+									<small>
+										{% if point.overwritten_code and point.overwritten_code != point.code %}
+										Code was corrected to "{{ point.overwritten_code }}".
+										{% else %}
+										Error was ignored, code is still invalid.
+										{% endif %}
+									</small>
+								</td>
+							</tr>
+							{% endif %}
+							{% endfor %}
+						</tbody>
+					</table>
+				</section>
+				<section>
+					<h4 id="quality-exceptions">Quality Exceptions</h4>
+					<p>The following points were flagged as having poor coordinate quality, be it due to out of
+						tolerance HRMS, VRMS, or a non-fixed status.</p>
+					<table style="margin-top: .5cm;">
+						<caption>
+							Where the HRMS tolerance is {{settings.hrms_tolerance}} and the VRMS tolerance is
+							{{settings.vrms_tolerance}}. Cells marked like <span class="mark">this</span> indicate a
+							poor
+							coordinate quality marker.
+						</caption>
+						<thead>
+							<tr>
+								<th>Point</th>
+								<th>VRMS</th>
+								<th>HRMS</th>
+								<th>Fixed</th>
+								<th>HDOP</th>
+								<th>VDOP</th>
+								<th>PDOP</th>
+								<th>Entered Rod Height</th>
+							</tr>
+						</thead>
+						<tbody>
+							{% for point in fw.points.all %}
+							{% if point.bad_hrms or point.bad_vrms or point.bad_fixed_status %}
+							<tr>
+								<th scope="row">{{point.P}}</th>
+								<td>
+									{% if point.bad_hrms %}
+									<span class="mark">
+										{# {{ point.hrms|floatformat:3 }} #}
+									</span>
+									{% else %}
+									{# {{ point.hrms|floatformat:3 }} #}
+									{% endif %}
+								</td>
+								<td>
+									{% if point.bad_vrms %}
+									<span class="mark">
+										{# {{ point.vrms|floatformat:3 }} #}
+									</span>
+									{% else %}
+									{# {{ point.vrms|floatformat:3 }} #}
+									{% endif %}
+								</td>
+								<td>
+									{% if point.bad_fixed_status %}
+									<span class="mark">
+										{# {{ point.is_fixed|yesno:'Yes,No' }} #}
+									</span>
+									{% else %}
+									{# {{ point.is_fixed|yesno:'Yes,No' }} #}
+									{% endif %}
+								</td>
+								{# <td>{{ point.hdop|floatformat:3 }}</td> #}
+								{# <td>{{ point.vdop|floatformat:3 }}</td> #}
+								{# <td>{{ point.pdop|floatformat:3 }}</td> #}
+								{# <td>{{ point.entered_rod_height|floatformat:3 }}</td> #}
+							</tr>
+							{% endif %}
+							{% endfor %}
+						</tbody>
+					</table>
+				</section>
+			</section>
+		</section>
+
+		<section class="page">
+			<h2 id="field-run-summary">Field Run Summary</h2>
+			{% if fw.fieldrun_map_screenshot.name %}
+			<figure>
+				<img src="{{fw.fieldrun_map_screenshot_data_uri}}">
+				<figcaption>
+					{% if img.note %}
+					{{img.note}}
+					{% else %}
+					A screenshot of the fieldrun map.
+					{% endif %}
+				</figcaption>
+			</figure>
+			{% endif %}
+			{% for point in fr.points.all %}
+			<!-- Display smaller if it's a nothing found or instruction point -->
+			{% if point.type in 'Instruction,NothingFound' %}
+			<h5 class="fieldrun-point-header">
+				{{ point.name }}
+				[{{point.type}}]
+				{# - ({{point.geom.x|floatformat:5}}, {{point.geom.y|floatformat:5}}) #}
+				"{{ point.note }}"
+			</h5>
+			{% else %}
+			<h4 class="fieldrun-point-header">{{ point.name }} [{{point.type}}]</h4>
+			<blockquote>{{point.note}}</blockquote>
+			<small><code>{{point.id}}</code></small>
+			{% endif %}
+			{% for img in point.images.all %}
+			<figure>
+				<img src="{{img.data_uri}}" style="max-height: 4in;">
+				<figcaption>
+					{% if img.note %}
+					{{img.note}}
+					{% else %}
+					Image of point {{ point.name }}.
+					{% endif %}
+				</figcaption>
+			</figure>
+			{% endfor %}
+			{% endfor %}
+		</section>
+
+		<section class="page">
+			<h2 id="final-coords">Final Coords</h2>
+			<table id="final-coord-table" style="font-size: .85rem !important;">
+				<thead>
+					<tr>
+						<th><small>P.</small></th>
+						<th><small>E.</small></th>
+						<th><small>N.</small></th>
+						<th><small>Elev.</small></th>
+						<th><small>Description</small></th>
+						<th><small>Code</small></th>
+						<th><small>RH</small></th>
+						<th><small>Error</small></th>
+						<th><small>Fixed</small></th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for point in fw.points.all %}
+					<tr>
+						<td><small>{{ point.P }}</small></td>
+						{# <td><small>{{ point.shifted_e|floatformat:3 }}</small></td>
+						<td><small>{{ point.shifted_n|floatformat:3 }}</small></td>
+						<td><small>{{ point.shifted_z|floatformat:3 }}</small></td> #}
+						<td>
+							<small>
+								{{ point.description_with_final_code }}
+							</small>
+						</td>
+						<td>
+							<small>
+								{{ point.final_code }}
+							</small>
+						</td>
+						<td>
+							<small>
+								{{ point.entered_rod_height }}
+							</small>
+						</td>
+						<td>
+							<div>
+								<small style="text-wrap: nowrap; white-space: nowrap;">
+									HRMS: {% if point.bad_hrms %}
+									<span class="mark">
+										{# {{ point.hrms|floatformat:3 }} #}
+									</span>
+									{% else %}
+									{# {{ point.hrms|floatformat:3 }} #}
+									{% endif %}
+								</small>
+							</div>
+							<div>
+								<small style="text-wrap: nowrap; white-space: nowrap;">
+									VRMS: {% if point.bad_vrms %}
+									<span class="mark">
+										{# {{ point.vrms|floatformat:3 }} #}
+									</span>
+									{% else %}
+									{# {{ point.vrms|floatformat:3 }} #}
+									{% endif %}
+								</small>
+							</div>
+							</div>
+							<div>
+								<small style="text-wrap: nowrap; white-space: nowrap;">
+									{# HDOP: {{ point.hdop|floatformat:3 }} #}
+								</small>
+							</div>
+							</div>
+							<div>
+								<small style="text-wrap: nowrap; white-space: nowrap;">
+									{# VDOP: {{ point.vdop|floatformat:3 }} #}
+								</small>
+							</div>
+							<div>
+								<small style="text-wrap: nowrap; white-space: nowrap;">
+									{# PDOP: {{ point.pdop|floatformat:3 }} #}
+								</small>
+							</div>
+						</td>
+						<td>
+							{% if point.bad_fixed_status %}
+							<span class="mark">
+								{# {{ point.is_fixed|yesno:'Yes,No' }} #}
+							</span>
+							{% else %}
+							{# {{ point.is_fixed|yesno:'Yes,No' }} #}
+							{% endif %}
+						</td>
+					</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</section>
+
+		{% if DETAILED_REPORT %}
+		<section class="page">
+			<h2 id="raw-data">Raw Data</h2>
+			<section>
+				<h3 id="crdb-file">CRDB File</h3>
+				<table style="font-size: .85rem;">
+					<thead>
+						<tr>
+							<th>P</th>
+							<th>E</th>
+							<th>N</th>
+							<th>Z</th>
+							<th>D</th>
+							<th>LockStatus</th>
+						</tr>
+					</thead>
+					<tbody>
+						{% for row in crdb_file_rows %}
+						<tr>
+							<td><small>{{row.P}}</small></td>
+							<td><small>{{row.E}}</small></td>
+							<td><small>{{row.N}}</small></td>
+							<td><small>{{row.Z}}</small></td>
+							<td><small>{{row.D}}</small></td>
+							<td><small>{{row.LockStatus}}</small></td>
+						</tr>
+						{% endfor %}
+					</tbody>
+				</table>
+			</section>
+			<section>
+				<h3 id="rw5-file">RW5 File</h3>
+				<small>
+					<code style="white-space: pre; text-wrap: pretty;">{{ rw5_file_contents }}</code>
+				</small>
+			</section>
+			<section>
+				<h3 id="ref-file">REF File</h3>
+				<small>
+					<code style="white-space: pre; text-wrap: pretty;">{{ ref_file_contents }}</code>
+				</small>
+			</section>
+			<section>
+				<h3 id="loc-file">LOC File</h3>
+				<small>
+					<code style="white-space: pre; text-wrap: pretty;">{{ loc_file_contents }}</code>
+				</small>
+			</section>
+			<section>
+				<h3 id="sum-file">SUM File</h3>
+				<small>
+					<code style="white-space: pre; text-wrap: pretty;">{{ sum_file_contents }}</code>
+				</small>
+			</section>
+		</section>
+		{% endif %} #}
+
+	</article>
+</main>
+
+</html>

@@ -1,5 +1,5 @@
 
-from typing import Optional, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 from PyQt5.QtWidgets import QDialog, QTreeWidgetItem, QWidget
 from qgis.core import Qgis, QgsFeature, QgsMessageLog, QgsVectorLayer
@@ -7,6 +7,9 @@ from qgis.PyQt import QtCore, QtGui
 
 from fieldworkimport.fwimport.merge_helpers import calc_parent_child_residuals, get_average_point
 from fieldworkimport.ui.generated.same_point_shots_ui import Ui_SamePointShotsDialog
+
+if TYPE_CHECKING:
+    from fieldworkimport.plugin import PluginInput
 
 PARENT_POINT_TREE_WIDGET_FONT = QtGui.QFont()
 PARENT_POINT_TREE_WIDGET_FONT.setPointSize(11)
@@ -58,12 +61,14 @@ class ParentPointTreeWidgetItem(QTreeWidgetItem):
     parent_point: QgsFeature
     child_points: list[QgsFeature]
     fieldworkshot_layer: QgsVectorLayer
+    plugin_input: "PluginInput"
 
-    def __init__(self, fieldworkshot_layer: QgsVectorLayer, child_points: list[QgsFeature]) -> None:
+    def __init__(self, fieldworkshot_layer: QgsVectorLayer, child_points: list[QgsFeature], plugin_input: "PluginInput") -> None:
         super().__init__()
         self.fieldworkshot_layer = fieldworkshot_layer
         self.child_points = child_points
-        self.parent_point = get_average_point(self.fieldworkshot_layer, self.child_points)
+        self.plugin_input = plugin_input
+        self.parent_point = get_average_point(self.fieldworkshot_layer, self.child_points, self.plugin_input)
 
         # set special font for parent
         for i in range(self.columnCount()):
@@ -104,7 +109,7 @@ class ParentPointTreeWidgetItem(QTreeWidgetItem):
                 features.append(child.point)
         if not features:
             return
-        self.parent_point = get_average_point(self.fieldworkshot_layer, features)
+        self.parent_point = get_average_point(self.fieldworkshot_layer, features, self.plugin_input)
         self.show_point()
 
         # update children with new point
@@ -130,8 +135,8 @@ class SamePointShotsDialog(QDialog, Ui_SamePointShotsDialog):
     def __init__(
         self,
         fieldworkshot_layer: QgsVectorLayer,
-        same_point_tolerance: float,
         groups: list[list[QgsFeature]],
+        plugin_input: "PluginInput",
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
@@ -139,12 +144,12 @@ class SamePointShotsDialog(QDialog, Ui_SamePointShotsDialog):
         self.setupUi(self)
 
         # show actual tolerance in label
-        self.tolerance_text.setText(self.tolerance_text.text().replace("{{same_point_tolerance}}", f"{same_point_tolerance:.2f}"))  # noqa: E501
+        self.tolerance_text.setText(self.tolerance_text.text().replace("{{same_point_tolerance}}", f"{plugin_input.same_point_tolerance:.2f}"))  # noqa: E501
 
         # setup rows
         items = []
         for group in groups:
-            parent_tree_item = ParentPointTreeWidgetItem(fieldworkshot_layer, child_points=group)
+            parent_tree_item = ParentPointTreeWidgetItem(fieldworkshot_layer, child_points=group, plugin_input=plugin_input)
             items.append(parent_tree_item)
 
         self.tree_widget.addTopLevelItems(items)
@@ -157,10 +162,7 @@ class SamePointShotsDialog(QDialog, Ui_SamePointShotsDialog):
         self.tree_widget.itemChanged.connect(self.on_tree_widget_item_changed)
 
     def on_tree_widget_item_changed(self, item: QTreeWidgetItem):
-        if isinstance(item, ParentPointTreeWidgetItem):
-            QgsMessageLog.logMessage("parent checked", level=Qgis.MessageLevel.Info)
-        elif isinstance(item, ChildPointTreeWidgetItem):
-            QgsMessageLog.logMessage("child checked", level=Qgis.MessageLevel.Info)
+        if isinstance(item, ChildPointTreeWidgetItem):
             item = cast("ChildPointTreeWidgetItem", item)
             item.parent_point_widget_item.recalc_point()
 

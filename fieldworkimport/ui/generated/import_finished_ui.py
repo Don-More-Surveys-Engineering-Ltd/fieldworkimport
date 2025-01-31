@@ -14,7 +14,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 class Ui_ImportFinishedDialog(object):
     def setupUi(self, ImportFinishedDialog):
         ImportFinishedDialog.setObjectName("ImportFinishedDialog")
-        ImportFinishedDialog.resize(400, 300)
+        ImportFinishedDialog.resize(392, 277)
         self.verticalLayout = QtWidgets.QVBoxLayout(ImportFinishedDialog)
         self.verticalLayout.setObjectName("verticalLayout")
         self.label = QtWidgets.QLabel(ImportFinishedDialog)
@@ -40,7 +40,7 @@ class Ui_ImportFinishedDialog(object):
         self.verticalLayout.addItem(spacerItem)
         self.buttonBox = QtWidgets.QDialogButtonBox(ImportFinishedDialog)
         self.buttonBox.setOrientation(QtCore.Qt.Horizontal)
-        self.buttonBox.setStandardButtons(QtWidgets.QDialogButtonBox.Discard|QtWidgets.QDialogButtonBox.Ok)
+        self.buttonBox.setStandardButtons(QtWidgets.QDialogButtonBox.Abort|QtWidgets.QDialogButtonBox.Ok)
         self.buttonBox.setObjectName("buttonBox")
         self.verticalLayout.addWidget(self.buttonBox)
 
@@ -53,7 +53,7 @@ class Ui_ImportFinishedDialog(object):
         _translate = QtCore.QCoreApplication.translate
         ImportFinishedDialog.setWindowTitle(_translate("ImportFinishedDialog", "Import Finished"))
         self.label.setText(_translate("ImportFinishedDialog", "Import Completed!"))
-        self.label_2.setText(_translate("ImportFinishedDialog", "Click OK to save your changes, or click discard to discard changes."))
+        self.label_2.setText(_translate("ImportFinishedDialog", "Click OK to save your changes, or click abort to discard changes."))
         self.groupBox.setTitle(_translate("ImportFinishedDialog", "Next Steps"))
         self.next_publish_controls_checkbox.setText(_translate("ImportFinishedDialog", "Find and publish new controls (PublishControls plugin)"))
         self.next_create_report_checkbox.setText(_translate("ImportFinishedDialog", "Create a report on this fieldwork (FieldworkReport plugin)"))

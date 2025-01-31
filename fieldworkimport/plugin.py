@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pprint
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -11,6 +13,9 @@ from qgis.utils import iface as _iface
 
 from fieldworkimport.controlpublish.publish_controls_dialog import PublishControlsDialog
 from fieldworkimport.fwimport.import_process import FieldworkImportProcess
+from fieldworkimport.helpers import BASE_DIR, progress_dialog, timed
+from fieldworkimport.reportgen.report_process import create_report, get_report_variables
+from fieldworkimport.ui.generate_report_dialog import GenerateReportDialog
 from fieldworkimport.ui.import_finished_dialog import ImportFinishedDialog
 
 iface: QgisInterface = _iface  # type: ignore
@@ -19,22 +24,38 @@ from fieldworkimport.exceptions import AbortError
 from fieldworkimport.ui.import_dialog import ImportFieldworkDialog
 
 
+@dataclass
+class PluginInput:
+    """Holds validation settings and import input."""
+
+    vrms_tolerance: float
+    hrms_tolerance: float
+    same_point_tolerance: float
+    valid_codes: list[str]
+    valid_special_chars: list[str]
+    parameterized_special_chars: list[str]
+    control_point_codes: list[str]
+    crdb_path: str
+    rw5_path: str
+    sum_path: str | None
+    ref_path: str | None
+    loc_path: str | None
+    fieldrun_feature: QgsFeature | None
+
+
 class Plugin:
     """QGIS Plugin Implementation."""
 
     name = "fieldworkimport"
     import_dialog: ImportFieldworkDialog | None
-    active_fieldwork_feature = None
-
-    geopackage_path: str
-    geopackage_layers_group_name: str
     fieldwork_layer: QgsVectorLayer
     fieldworkshot_layer: QgsVectorLayer
+    plugin_input: PluginInput | None
 
     def __init__(self) -> None:
         self.actions: list[QAction] = []
         self.menu = Plugin.name
-        self.import_dialog = None
+        self.plugin_input = None
 
     def add_action(
         self,
@@ -106,7 +127,7 @@ class Plugin:
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
         self.setup_settings()
         self.add_action(
-            str(Path(__file__).parent / "resources" / "icons" / "noun-geodesy-7254004.svg"),
+            str(BASE_DIR / "resources" / "icons" / "noun-geodesy-7254004.svg"),
             text="Import Fieldwork",
             callback=self.start_import,
             parent=iface.mainWindow(),
@@ -116,6 +137,13 @@ class Plugin:
             "",
             text="Find and Publish Controls",
             callback=self.start_publish_controls,
+            parent=iface.mainWindow(),
+            add_to_toolbar=False,
+        )
+        self.add_action(
+            "",
+            text="Generate a Processing Report",
+            callback=self.start_generate_report,
             parent=iface.mainWindow(),
             add_to_toolbar=False,
         )
@@ -133,7 +161,7 @@ class Plugin:
         settings = QgsSettings()
         key = "dmse/importfieldwork/validation_settings_file"
         if not settings.contains(key) or not settings.value(key) or not Path(settings.value(key)).exists():
-            settings.setValue(key, Path(__file__).parent / "resources" / "validation_settings.json")
+            settings.setValue(key, BASE_DIR / "resources" / "validation_settings.json")
 
     def _setup_import_dialog(self) -> ImportFieldworkDialog:
         dialog = ImportFieldworkDialog()
@@ -144,35 +172,24 @@ class Plugin:
         if not self.import_dialog:
             return
 
-        crdb_path = self.import_dialog.crdb_file_input.filePath()
-        rw5_path = self.import_dialog.rw5_file_input.filePath()
-        sum_path = self.import_dialog.sum_file_input.filePath()
-        ref_path = self.import_dialog.ref_file_input.filePath()
-        loc_path = self.import_dialog.loc_file_input.filePath()
-        fieldrun: QgsFeature = self.import_dialog.fieldrun_input.feature()
-
-        vrms_tolerance = self.import_dialog.vrms_tolerance_input.value()
-        hrms_tolerance = self.import_dialog.hrms_tolerance_input.value()
-        same_point_tolerance = self.import_dialog.same_point_tolerance_input.value()
-        valid_codes = self.import_dialog.valid_codes_input.toPlainText().split(",")
-        valid_special_chars = self.import_dialog.valid_special_chars_input.text().split(",")
-        parameterized_special_chars = self.import_dialog.parameterized_special_chars_input.text().split(",")
-        control_point_codes = self.import_dialog.control_point_codes_input.text().split(",")
+        self.plugin_input = PluginInput(
+            crdb_path=self.import_dialog.crdb_file_input.filePath(),
+            rw5_path=self.import_dialog.rw5_file_input.filePath(),
+            sum_path=self.import_dialog.sum_file_input.filePath(),
+            ref_path=self.import_dialog.ref_file_input.filePath(),
+            loc_path=self.import_dialog.loc_file_input.filePath(),
+            fieldrun_feature=self.import_dialog.fieldrun_input.feature(),
+            vrms_tolerance=self.import_dialog.vrms_tolerance_input.value(),
+            hrms_tolerance=self.import_dialog.hrms_tolerance_input.value(),
+            same_point_tolerance=self.import_dialog.same_point_tolerance_input.value(),
+            valid_codes=self.import_dialog.valid_codes_input.toPlainText().split(","),
+            valid_special_chars=self.import_dialog.valid_special_chars_input.text().split(","),
+            parameterized_special_chars=self.import_dialog.parameterized_special_chars_input.text().split(","),
+            control_point_codes=self.import_dialog.control_point_codes_input.text().split(","),
+        )
 
         fwimport = FieldworkImportProcess(
-            vrms_tolerance,
-            hrms_tolerance,
-            same_point_tolerance,
-            valid_codes,
-            valid_special_chars,
-            parameterized_special_chars,
-            control_point_codes,
-            crdb_path,
-            rw5_path,
-            sum_path,
-            ref_path,
-            loc_path,
-            fieldrun,
+            self.plugin_input,
         )
 
         try:
@@ -186,14 +203,19 @@ class Plugin:
 
         if return_code == ImportFinishedDialog.Rejected:
             fwimport.rollback()
-        else:
+            return
+
+        with progress_dialog("Saving Changes...", indeterminate=True):
             fwimport.layers.fieldwork_layer.commitChanges()
             fwimport.layers.fieldworkshot_layer.commitChanges()
+            fwimport.layers.fieldrunshot_layer.commitChanges()
+            fwimport.layers.controlpointdata_layer.commitChanges()
 
         if import_finished_dialog.next_publish_controls_checkbox.isChecked():
-            self.start_publish_controls(fwimport.fieldwork_feature)
+            with timed("start_publish_controls"):
+                self.start_publish_controls(fwimport.fieldwork_feature)
         if import_finished_dialog.next_create_report_checkbox.isChecked():
-            pass  # TODO: Create report
+            self.start_generate_report()
 
     def start_import(self) -> None:
         """Run method that performs all the real work."""
@@ -202,5 +224,22 @@ class Plugin:
         self.import_dialog.accepted.connect(self._on_accept_new_form)
 
     def start_publish_controls(self, *args, default_fieldwork: QgsFeature | None = None):
-        dialog = PublishControlsDialog(default_fieldwork)
+        with progress_dialog("Searching for new controls...", indeterminate=True):
+            dialog = PublishControlsDialog(default_fieldwork)
         dialog.exec_()
+
+    def start_generate_report(self, *args, default_fieldwork: QgsFeature | None = None):
+        dialog = GenerateReportDialog()
+        return_code = dialog.exec_()
+        if return_code == dialog.Rejected:
+            return
+        fieldwork_feature = dialog.fieldwork_input.feature()
+        job_number = dialog.job_number_input.text()
+        client_name = dialog.client_name_input.text()
+        with Path(r"C:\Users\jlong\Downloads\out.txt").open("w") as fptr, progress_dialog("report vars", indeterminate=True):
+            vars = get_report_variables(fieldwork_feature, None, job_number, client_name)
+            fptr.write(pprint.pformat(vars))
+
+        with Path(r"C:\Users\jlong\Downloads\out.html").open("w") as fptr, progress_dialog("report html", indeterminate=True):
+            html = create_report(vars)
+            fptr.write(html)

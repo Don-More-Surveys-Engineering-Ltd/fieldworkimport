@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Generator, Iterable, Sequence
-from typing import Any, Callable, Optional, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Optional, TypeVar
 
 from qgis.core import QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVectorLayer
 
@@ -10,17 +10,20 @@ from fieldworkimport.exceptions import AbortError
 from fieldworkimport.fwimport.merge_helpers import get_average_point
 from fieldworkimport.ui.same_point_shots_dialog import SamePointShotsDialog
 
+if TYPE_CHECKING:
+    from fieldworkimport.plugin import PluginInput
+
+
 _GC_T = TypeVar("_GC_T")
 
 
 def should_be_averaged_together(
     p1: QgsFeature,
     p2: QgsFeature,
-    same_point_tolerance: float,
-    control_point_codes: list[str],
+    plugin_input: "PluginInput",
 ) -> bool:
     """Return True if the two coords belong in an averaging group together."""  # noqa: DOC201
-    QgsMessageLog.logMessage(f"CMP: {p1.attribute('name')} -> {p2.attribute('name')}")
+    # QgsMessageLog.logMessage(f"CMP: {p1.attribute('name')} -> {p2.attribute('name')}")
 
     p1_code = p1.attribute("code")
     p2_code = p2.attribute("code")
@@ -33,17 +36,15 @@ def should_be_averaged_together(
 
     # If already averaged (the user went back?) skip
     if p1_parent_point_id or p2_parent_point_id:
-        QgsMessageLog.logMessage("FAIL PARENT ID")
 
         return False
 
     # Same code
     if p1_code != p2_code:
-        QgsMessageLog.logMessage("FAIL CODE")
         return False
 
     # Within tolerance
-    if p1_code in control_point_codes:
+    if p1_code in plugin_input.control_point_codes:
         p1_elevation = p1.attribute("elevation")
         p2_elevation = p2.attribute("elevation")
         # factor elevation into distance calc if control point for 3d calculations
@@ -56,11 +57,7 @@ def should_be_averaged_together(
         # if not control point, just use 2d calculations
         distance = math.sqrt((p2_easting - p1_easting) ** 2 + (p2_northing - p1_northing) ** 2)
 
-    if distance > same_point_tolerance:
-        QgsMessageLog.logMessage(f"FAIL TOLERANCE {distance=} {same_point_tolerance=}")
-        return False
-    QgsMessageLog.logMessage("PASS")
-    return True
+    return not distance > plugin_input.same_point_tolerance
 
 
 def _group_consecutively(iterable: Iterable[_GC_T], comparator: Callable[[_GC_T, _GC_T], bool]) -> Generator[list[_GC_T], Any, None]:  # noqa: E501
@@ -82,15 +79,13 @@ def _group_consecutively(iterable: Iterable[_GC_T], comparator: Callable[[_GC_T,
 
 def find_groups_of_same_shots(
     points: Sequence[QgsFeature],
-    same_point_tolerance: float,
-    control_point_codes: list[str],
+    plugin_input: "PluginInput",
 ) -> list[list[QgsFeature]]:
     def is_same_group(p1: QgsFeature, p2: QgsFeature) -> bool:
         return should_be_averaged_together(
             p1,
             p2,
-            same_point_tolerance=same_point_tolerance,
-            control_point_codes=control_point_codes,
+            plugin_input,
         )
 
     # Consecutive
@@ -100,12 +95,13 @@ def find_groups_of_same_shots(
 def create_averaged_point(
     fieldworkshot_layer: QgsVectorLayer,
     group: list[QgsFeature],
+    plugin_input: "PluginInput",
 ):
     fields = fieldworkshot_layer.fields()
     parent_point_id_index = fields.indexFromName("parent_point_id")
 
     # get avg point of group
-    avg_point = get_average_point(fieldworkshot_layer, group)
+    avg_point = get_average_point(fieldworkshot_layer, group, plugin_input)
     avg_point_id = avg_point.attribute("id")
 
     # add avg point to layer
@@ -121,8 +117,7 @@ def create_averaged_point(
 def local_point_merge(
     fieldworkshot_layer: QgsVectorLayer,
     fieldwork_id: int,
-    same_point_tolerance: float,
-    control_point_codes: list[str],
+    plugin_input: "PluginInput",
 ):
     QgsMessageLog.logMessage(
         "Local point merge started.",
@@ -137,11 +132,10 @@ def local_point_merge(
 
     groups = find_groups_of_same_shots(
         points,
-        same_point_tolerance=same_point_tolerance,
-        control_point_codes=control_point_codes,
+        plugin_input,
     )
 
-    dialog = SamePointShotsDialog(fieldworkshot_layer, same_point_tolerance=same_point_tolerance, groups=groups)
+    dialog = SamePointShotsDialog(fieldworkshot_layer, groups=groups, plugin_input=plugin_input)
     return_code = dialog.exec_()
     if return_code == dialog.Rejected:
         msg = "Aborted during local point merge stage."
@@ -149,4 +143,4 @@ def local_point_merge(
 
     final_groups = dialog.final_groups
     for group in final_groups:
-        create_averaged_point(fieldworkshot_layer, group)
+        create_averaged_point(fieldworkshot_layer, group, plugin_input)

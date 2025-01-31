@@ -1,15 +1,16 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from qgis.core import Qgis, QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVectorLayerUtils
+from qgis.core import Qgis, QgsFeature, QgsFeatureRequest, QgsGeometry, QgsMessageLog, QgsVectorLayerUtils
 from qgis.PyQt.QtSql import QSqlQuery
 
-from fieldworkimport.helpers import layer_database_connection
+from fieldworkimport.helpers import layer_database_connection, not_NULL, progress_dialog, timed
 from fieldworkimport.ui.match_control_item import MatchControlItem
 from fieldworkimport.ui.match_to_controls_dialog import MatchToControlsDialog
 
 if TYPE_CHECKING:
     from fieldworkimport.fwimport.import_process import FieldworkImportLayers
+    from fieldworkimport.plugin import PluginInput
 
 
 class FieldRunMatchStage:
@@ -17,19 +18,19 @@ class FieldRunMatchStage:
     fw_matching_fieldrun_shot_id_index: int
     fieldwork_id: str
     fieldrun_id: Optional[int]  # noqa: FA100
-    control_point_codes: list[str]
+    plugin_input: "PluginInput"
 
     def __init__(  # noqa: D107
         self,
         layers: "FieldworkImportLayers",
         fieldwork_id: str,
         fieldrun_id: Optional[int],  # noqa: FA100
-        control_point_codes: list[str],
+        plugin_input: "PluginInput",
     ) -> None:
         self.layers = layers
         self.fieldwork_id = fieldwork_id
         self.fieldrun_id = fieldrun_id
-        self.control_point_codes = control_point_codes
+        self.plugin_input = plugin_input
 
         fw_fields = self.layers.fieldworkshot_layer.fields()
         self.fw_matching_fieldrun_shot_id_index = fw_fields.indexFromName("matching_fieldrun_shot_id")
@@ -39,9 +40,11 @@ class FieldRunMatchStage:
         QgsMessageLog.logMessage(
             "FieldRunMatchStage.run started.",
         )
-        self.match_controls()
         if self.fieldrun_id:
-            self.match_on_name()
+            with timed("match_on_name"):
+                self.match_on_name()
+        with timed("match_controls"):
+            self.match_controls()
 
     def create_fieldrun_control_shot(self, name: str, based_on_fieldwork_shot: QgsFeature) -> QgsFeature:
         new_fieldrunshot = QgsVectorLayerUtils.createFeature(self.layers.fieldrunshot_layer)
@@ -50,14 +53,16 @@ class FieldRunMatchStage:
         new_fieldrunshot[fields.indexFromName("name")] = name
         new_fieldrunshot[fields.indexFromName("type")] = "Control"
         new_fieldrunshot[fields.indexFromName("field_run_id")] = self.fieldrun_id
-        new_fieldrunshot[fields.indexFromName("description")] = f"[Generated to match shot {based_on_fieldwork_shot.attribute('name')}]"
-        new_fieldrunshot.setGeometry(based_on_fieldwork_shot.geometry())
+        new_fieldrunshot[fields.indexFromName("description")] = f"{based_on_fieldwork_shot.attribute("description")}\n[Generated to match shot {based_on_fieldwork_shot.attribute('name')}]"  # noqa: E501
+        geom = QgsGeometry(based_on_fieldwork_shot.geometry())
+        new_fieldrunshot.setGeometry(geom)
 
         self.layers.fieldrunshot_layer.addFeature(new_fieldrunshot)
 
         new_controlpointdata = QgsVectorLayerUtils.createFeature(self.layers.controlpointdata_layer)
         cpd_fields = self.layers.controlpointdata_layer.fields()
         new_controlpointdata[cpd_fields.indexFromName("fieldrun_shot_id")] = new_fieldrunshot.attribute("id")
+
         self.layers.controlpointdata_layer.addFeature(new_controlpointdata)
 
         return new_fieldrunshot
@@ -69,8 +74,8 @@ class FieldRunMatchStage:
 
         # recurse up ancestor tree.
         parent_point_id = fw_shot.attribute("parent_point_id")
-        if parent_point_id:
-            parent_point = self.layers.fieldworkshot_layer.getFeature(parent_point_id)
+        if not_NULL(parent_point_id):
+            parent_point = next(self.layers.fieldworkshot_layer.getFeatures(f"id = '{parent_point_id}'"))
             self.assign_fr_shot(parent_point, fr_shot_id)
 
     def match_on_name(self) -> None:
@@ -92,7 +97,7 @@ class FieldRunMatchStage:
         fr_points: list[QgsFeature] = [
             *self.layers.fieldrunshot_layer.getFeatures(
                 QgsFeatureRequest()
-                .setFilterExpression(f"\"fieldrun_id\" = '{self.fieldrun_id}'"),
+                .setFilterExpression(f'"field_run_id" = {self.fieldrun_id}'),
             ),  # type: ignore []
         ]
         fr_name_feature_tuples = [(f.attribute("name"), f) for f in fr_points]
@@ -103,6 +108,7 @@ class FieldRunMatchStage:
             if fw_shot_name in fr_name_feature_map:
                 fr_shot = fr_name_feature_map[fw_shot_name]
                 fr_shot_id = fr_shot.attribute("id")
+                QgsMessageLog.logMessage(f"Matched {fw_shot.attribute('name')} to field run shot {fr_shot.attribute('name')} based on name.")
 
                 self.assign_fr_shot(fw_shot, fr_shot_id)
 
@@ -116,15 +122,18 @@ class FieldRunMatchStage:
         allow_create_new = self.fieldrun_id is not None
 
         # find control-type fieldwork shots that need fieldrunshot matches.
-        cp_code_clause = " OR ".join([f"\"code\" like '{code}'" for code in self.control_point_codes])
+        cp_code_clause = " OR ".join([f"\"code\" like '{code}'" for code in self.plugin_input.control_point_codes])
         # Points with a cp code (mon or cp), are parent points, and are of the current fieldwork.
         fw_controls_needing_matches: list[QgsFeature] = [*self.layers.fieldworkshot_layer.getFeatures(
             f'"fieldwork_id" = \'{self.fieldwork_id}\' and "parent_point_id" is null and ({cp_code_clause})',
         )]  # type: ignore []
 
-        with layer_database_connection(self.layers.fieldrunshot_layer) as db:
+        n_controls = len(fw_controls_needing_matches)
+
+        with layer_database_connection(self.layers.fieldwork_layer) as db, progress_dialog("Finding control point matches...") as set_progress:
             # add widget for each fieldworkshot control
-            for fw_shot in fw_controls_needing_matches:
+            for index, fw_shot in enumerate(fw_controls_needing_matches):
+                set_progress(index * 100 // n_controls)
                 # find nearby suggestions
                 point = fw_shot.geometry().asPoint()
                 distance_threshold = 5
@@ -150,7 +159,6 @@ class FieldRunMatchStage:
                     while query.next():
                         feature_id = query.value(0)  # ID
                         feature_ids.append(feature_id)
-                        QgsMessageLog.logMessage(f"query next {feature_id}", level=Qgis.MessageLevel.Critical)
                 else:
                     QgsMessageLog.logMessage("No exec", level=Qgis.MessageLevel.Critical)
                     QgsMessageLog.logMessage(f"{db.lastError().text()}", level=Qgis.MessageLevel.Critical)
@@ -164,7 +172,7 @@ class FieldRunMatchStage:
                 match_control_item = MatchControlItem(self.layers, fw_shot, suggestions, allow_create_new=allow_create_new)
                 dialog.scrollAreaContents.layout().addWidget(match_control_item)
 
-        dialog.exec()
+        dialog.exec_()
 
         for fieldwork_shot, control_match_result in dialog.results:
             if control_match_result.matched_fieldrunshot:

@@ -1,7 +1,13 @@
 import string
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from qgis.core import QgsFeature, QgsVectorLayer
+
+from fieldworkimport.fwimport.stage_2_validate_points import validate_point
+
+if TYPE_CHECKING:
+    from fieldworkimport.plugin import PluginInput
 
 
 def parent_point_name(child_name: str):
@@ -12,7 +18,7 @@ def parent_point_name(child_name: str):
     return child_name[:-1] + chr(ord(child_name[-1]) + 1)
 
 
-def get_average_point(fieldworkshot_layer: QgsVectorLayer, points: list[QgsFeature]) -> QgsFeature:  # noqa: D103, PLR0914
+def get_average_point(fieldworkshot_layer: QgsVectorLayer, points: list[QgsFeature], plugin_input: "PluginInput") -> QgsFeature:  # noqa: D103, PLR0914
     n = len(points)
 
     f = QgsFeature(points[0])
@@ -50,6 +56,8 @@ def get_average_point(fieldworkshot_layer: QgsVectorLayer, points: list[QgsFeatu
     f[VDOP_index] = sum(p[VDOP_index] for p in points if p[VDOP_index]) / max(n_with_VDOP, 1)
     f[TDOP_index] = sum(p[TDOP_index] for p in points if p[TDOP_index]) / max(n_with_TDOP, 1)
     f[GDOP_index] = sum(p[GDOP_index] for p in points if p[GDOP_index]) / max(n_with_GDOP, 1)
+
+    validate_point(f, plugin_input)
 
     return f
 

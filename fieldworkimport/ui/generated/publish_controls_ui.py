@@ -15,7 +15,7 @@ class Ui_PublishControlsDialog(object):
     def setupUi(self, PublishControlsDialog):
         PublishControlsDialog.setObjectName("PublishControlsDialog")
         PublishControlsDialog.setWindowModality(QtCore.Qt.WindowModal)
-        PublishControlsDialog.resize(400, 567)
+        PublishControlsDialog.resize(464, 556)
         self.verticalLayout = QtWidgets.QVBoxLayout(PublishControlsDialog)
         self.verticalLayout.setObjectName("verticalLayout")
         self.label = QtWidgets.QLabel(PublishControlsDialog)
@@ -43,7 +43,7 @@ class Ui_PublishControlsDialog(object):
         self.scrollArea.setWidgetResizable(True)
         self.scrollArea.setObjectName("scrollArea")
         self.scrollAreaWidgetContents = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 380, 428))
+        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 444, 431))
         self.scrollAreaWidgetContents.setObjectName("scrollAreaWidgetContents")
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents)
         self.verticalLayout_2.setContentsMargins(0, 0, 0, 0)

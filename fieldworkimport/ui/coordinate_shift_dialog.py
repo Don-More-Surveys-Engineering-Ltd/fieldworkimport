@@ -10,7 +10,7 @@ from qgis.PyQt import QtWidgets
 from fieldworkimport.helpers import not_NULL
 from fieldworkimport.ui.generated.coordinate_shift_ui import Ui_CoordinateShiftDialog
 
-CoordinateShiftDialogResult = tuple[Literal["NONE", "HPN", "CONTROL"], tuple[float, float, float] | None]
+CoordinateShiftDialogResult = tuple[Literal["NONE", "HPN", "CONTROL"], tuple[float, float, float] | None, list[QgsFeature] | None]
 
 
 class CheckBox(QWidget):
@@ -61,6 +61,7 @@ class CoordinateShiftDialog(QDialog, Ui_CoordinateShiftDialog):
     avg_control_shift: tuple[float, float, float]
     avg_row_index: int | None
     hpn_shift: tuple[float, float, float] | None
+    selected_fieldrun_shots: list[QgsFeature]
 
     def __init__(
         self,
@@ -77,6 +78,7 @@ class CoordinateShiftDialog(QDialog, Ui_CoordinateShiftDialog):
         self.checkbox_by_index = {}
         self.avg_control_shift = (0, 0, 0)
         self.avg_row_index = None
+        self.selected_fieldrun_shots = []
 
         self.control_shift_table.verticalHeader().hide()
         self.control_shift_table.setSizeAdjustPolicy(QtWidgets.QAbstractScrollArea.AdjustToContents)
@@ -149,6 +151,11 @@ class CoordinateShiftDialog(QDialog, Ui_CoordinateShiftDialog):
                 if (shift[2] and
                 self.checkbox_by_index[index].getCheckBox().isChecked())
         ]
+
+        self.selected_fieldrun_shots = [
+            fieldrunshot for index, fieldrunshot in self.fieldrun_shot_by_index.items()
+                if self.checkbox_by_index[index].getCheckBox().isChecked()
+        ]
         avg_shift_e = sum(e_shifts, start=0) / max(len(e_shifts), 1)
         avg_shift_n = sum(n_shifts, start=0) / max(len(n_shifts), 1)
         avg_shift_z = sum(z_shifts, start=0) / max(len(z_shifts), 1)
@@ -199,10 +206,10 @@ class CoordinateShiftDialog(QDialog, Ui_CoordinateShiftDialog):
     def get_result(self) -> CoordinateShiftDialogResult:
         """Return chosen shift type/value."""  # noqa: DOC201, DOC501
         if self.no_shift_radio.isChecked():
-            return ("NONE", None)
+            return ("NONE", None, None)
         if self.hpn_shift_radio.isChecked():
-            return ("HPN", self.hpn_shift)
+            return ("HPN", self.hpn_shift, None)
         if self.control_point_shift_radio.isChecked():
-            return ("CONTROL", self.avg_control_shift)
+            return ("CONTROL", self.avg_control_shift, self.selected_fieldrun_shots)
         msg = "No shift option selected."
         raise ValueError(msg)

@@ -1,7 +1,8 @@
 
+import datetime
 import sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytz
@@ -24,6 +25,10 @@ from fieldworkimport.exceptions import AbortError
 from fieldworkimport.fwimport.parse_loc_file import parse_loc_file
 from fieldworkimport.fwimport.parse_ref_file import parse_ref_file
 from fieldworkimport.fwimport.parse_sum_file import parse_sum_file
+
+if TYPE_CHECKING:
+    from fieldworkimport.fwimport.import_process import FieldworkImportLayers
+    from fieldworkimport.plugin import PluginInput
 
 try:
     import rw5_to_csv
@@ -60,14 +65,8 @@ def warn_against_duplicate_imports(fieldwork_layer: QgsVectorLayer, fieldwork_na
 
 
 def create_fieldwork(
-    fieldwork_layer: QgsVectorLayer,
-    fieldworkshot_layer: QgsVectorLayer,
-    crdb_path: str,
-    rw5_path: str,
-    sum_path: Optional[str],  # noqa: FA100
-    ref_path: Optional[str],  # noqa: FA100
-    loc_path: Optional[str],  # noqa: FA100
-    fieldrun_feature: Optional[QgsFeature],  # noqa: FA100
+    layers: "FieldworkImportLayers",
+    plugin_input: "PluginInput",
 ) -> QgsFeature:
     QgsMessageLog.logMessage(
         "Create fieldwork started.",
@@ -77,33 +76,34 @@ def create_fieldwork(
     sum_data = None
     ref_data = None
     field_run_id = None
-    if sum_path:
-        sum_data = parse_sum_file(Path(sum_path))
-    if loc_path:
-        loc_data = parse_loc_file(Path(loc_path), geoid_seperation=sum_data["geoid_seperation"] if sum_data else None)
-    if ref_path:
-        ref_data = parse_ref_file(Path(ref_path))
-    if fieldrun_feature:
-        field_run_id = fieldrun_feature.attribute("id")
+    if plugin_input.sum_path:
+        sum_data = parse_sum_file(Path(plugin_input.sum_path))
+    if plugin_input.loc_path:
+        loc_data = parse_loc_file(Path(plugin_input.loc_path), geoid_seperation=sum_data["geoid_seperation"] if sum_data else None)
+    if plugin_input.ref_path:
+        ref_data = parse_ref_file(Path(plugin_input.ref_path))
+    if plugin_input.fieldrun_feature:
+        field_run_id = plugin_input.fieldrun_feature.attribute("id")
 
-    rw5_rows = rw5_to_csv.convert(rw5_path=Path(rw5_path), output_path=None, tzinfo=timezone)
-    rw5_prelude = rw5_to_csv.prelude(rw5_path=Path(rw5_path))
+    rw5_rows = rw5_to_csv.convert(rw5_path=Path(plugin_input.rw5_path), output_path=None, tzinfo=timezone)
+    rw5_prelude = rw5_to_csv.prelude(rw5_path=Path(plugin_input.rw5_path))
 
     # check if this has already been imported
-    if warn_against_duplicate_imports(fieldwork_layer, rw5_prelude["JobName"]):
+    if warn_against_duplicate_imports(layers.fieldwork_layer, rw5_prelude["JobName"]):
         # user chose to abort due to duplicate
         msg = "Aborting due to duplicate import."
         raise AbortError(msg)
 
-    crdb_connection = sqlite3.connect(crdb_path)
+    crdb_connection = sqlite3.connect(plugin_input.crdb_path)
     crdb_connection.row_factory = sqlite3.Row
     cursor = crdb_connection.cursor()
 
-    fieldwork_layer_fields = fieldwork_layer.fields()
+    fieldwork_layer_fields = layers.fieldwork_layer.fields()
     fieldwork_layer_id_index = fieldwork_layer_fields.indexFromName("id")
     fieldwork_layer_field_run_id_index = fieldwork_layer_fields.indexFromName("field_run_id")
     fieldwork_layer_name_index = fieldwork_layer_fields.indexFromName("name")
     fieldwork_layer_note_index = fieldwork_layer_fields.indexFromName("note")
+    RW5_datetime_index = fieldwork_layer_fields.indexFromName("RW5_datetime")  # noqa: N806
     LOC_measured_easting_index = fieldwork_layer_fields.indexFromName("LOC_measured_easting")  # noqa: N806
     LOC_measured_northing_index = fieldwork_layer_fields.indexFromName("LOC_measured_northing")  # noqa: N806
     LOC_measured_elevation_index = fieldwork_layer_fields.indexFromName("LOC_measured_elevation")  # noqa: N806
@@ -123,12 +123,16 @@ def create_fieldwork(
     equipment_string_index = fieldwork_layer_fields.indexFromName("equipment_string")
     fieldwork_id = str(uuid4())
 
-    fieldwork_layer.startEditing()
-    new_fieldwork = QgsVectorLayerUtils.createFeature(fieldwork_layer)
+    layers.fieldwork_layer.startEditing()
+    new_fieldwork = QgsVectorLayerUtils.createFeature(layers.fieldwork_layer)
     new_fieldwork[fieldwork_layer_field_run_id_index] = field_run_id
     new_fieldwork[fieldwork_layer_id_index] = fieldwork_id
     new_fieldwork[fieldwork_layer_name_index] = rw5_prelude["JobName"]
     new_fieldwork[fieldwork_layer_note_index] = ""
+    if rw5_prelude.get("ISODateTime"):
+        dt = datetime.datetime.fromisoformat(rw5_prelude["ISODateTime"])
+        dt = datetime.datetime.combine(dt.date(), dt.time(), timezone)
+        new_fieldwork[RW5_datetime_index] = QDateTime(dt)
     new_fieldwork[LOC_measured_easting_index] = loc_data["measured_point"][0] if loc_data else None
     new_fieldwork[LOC_measured_northing_index] = loc_data["measured_point"][1] if loc_data else None
     new_fieldwork[LOC_measured_elevation_index] = loc_data["measured_point"][2] if loc_data else None
@@ -147,9 +151,9 @@ def create_fieldwork(
     new_fieldwork[SUM_orthometric_system_index] = sum_data["orthometric_system"] if sum_data else None
     new_fieldwork[equipment_string_index] = rw5_prelude["Equipment"]
 
-    fieldwork_layer.addFeature(new_fieldwork)
+    layers.fieldwork_layer.addFeature(new_fieldwork)
 
-    fieldworkshot_layer_fields = fieldworkshot_layer.fields()
+    fieldworkshot_layer_fields = layers.fieldworkshot_layer.fields()
     fieldworkshot_layer_id_index = fieldworkshot_layer_fields.indexFromName("id")
     fieldworkshot_layer_fieldwork_id_index = fieldworkshot_layer_fields.indexFromName("fieldwork_id")
     fieldworkshot_layer_name_index = fieldworkshot_layer_fields.indexFromName("name")
@@ -174,7 +178,7 @@ def create_fieldwork(
     instrument_height_index = fieldworkshot_layer_fields.indexFromName("instrument_height")
     instrument_type_index = fieldworkshot_layer_fields.indexFromName("instrument_type")
 
-    fieldworkshot_layer.startEditing()
+    layers.fieldworkshot_layer.startEditing()
 
     for rw5_row in rw5_rows:
         crdb_query = cursor.execute("SELECT * FROM Coordinates WHERE P like ?", (rw5_row["PointID"].strip(),))
@@ -194,7 +198,7 @@ def create_fieldwork(
         geom = QgsPoint(x=crdb_row["E"], y=crdb_row["N"])
         geom.transform(transform)
 
-        new_fieldwork_shot = QgsVectorLayerUtils.createFeature(fieldworkshot_layer)
+        new_fieldwork_shot = QgsVectorLayerUtils.createFeature(layers.fieldworkshot_layer)
         new_fieldwork_shot[fieldworkshot_layer_id_index] = str(uuid4())
         new_fieldwork_shot[fieldworkshot_layer_fieldwork_id_index] = fieldwork_id
         if rw5_row["DateTime"]:
@@ -220,13 +224,13 @@ def create_fieldwork(
         new_fieldwork_shot[instrument_height_index] = rw5_row["InstrumentHeight"]
         new_fieldwork_shot[instrument_type_index] = rw5_row["InstrumentType"]
         new_fieldwork_shot.setGeometry(geom)
-        fieldworkshot_layer.addFeature(new_fieldwork_shot)
+        layers.fieldworkshot_layer.addFeature(new_fieldwork_shot)
 
     # zoom layer to new fieldwork points
-    iface.setActiveLayer(fieldworkshot_layer)
-    fieldworkshot_layer.selectByExpression(f'"fieldwork_id" = \'{fieldwork_id}\'')
+    iface.setActiveLayer(layers.fieldworkshot_layer)
+    layers.fieldworkshot_layer.selectByExpression(f'"fieldwork_id" = \'{fieldwork_id}\'')
     map_canvas = iface.mapCanvas()
     if map_canvas:
-        map_canvas.zoomToSelected(fieldworkshot_layer)
+        map_canvas.zoomToSelected(layers.fieldworkshot_layer)
 
     return new_fieldwork

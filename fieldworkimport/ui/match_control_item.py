@@ -1,11 +1,13 @@
+from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from PyQt5.QtWidgets import QRadioButton, QWidget
-from qgis.core import Qgis, QgsFeature, QgsMessageLog
+from qgis.core import QgsFeature, QgsMessageLog
 
 from fieldworkimport.exceptions import AbortError
+from fieldworkimport.helpers import not_NULL
 from fieldworkimport.ui.generated.match_control_item import Ui_match_control_item
 
 if TYPE_CHECKING:
@@ -14,27 +16,31 @@ if TYPE_CHECKING:
 
 @dataclass
 class ControlMatchResult:
-    matched_fieldrunshot: Optional[QgsFeature]
+    matched_fieldrunshot: QgsFeature | None
     # if not None, use feature as match.
-    new_fieldrunshot_name: Optional[str]
+    new_fieldrunshot_name: str | None
     # if matched_fieldrunshot is None, create a new fieldrunshot using this name.
 
 
-def calc_redisuals(layers: "FieldworkImportLayers", fw_shot: QgsFeature, fr_shot: QgsFeature):
+def calc_redisuals(layers: "FieldworkImportLayers", fw_shot: QgsFeature, fr_shot: QgsFeature) -> tuple[float, float, float | None] | None:  # noqa: D103, E501, UP037
     fr_shot_id = fr_shot.attribute("id")
-    controlpointdata: Optional[QgsFeature] = next(layers.controlpointdata_layer.getFeatures(f"\"fieldrun_shot_id\" = '{fr_shot_id}'"), None)  # type: ignore
+    controlpointdata: QgsFeature | None = next(layers.controlpointdata_layer.getFeatures(f"\"fieldrun_shot_id\" = '{fr_shot_id}'"), None)  # type: ignore []  # noqa: E501
     if not controlpointdata:
         msg = "Fieldrun Shot has no control point data. Invalid for control residuals."
         raise ValueError(msg)
     primary_coord_id = controlpointdata.attribute("primary_coord_id")
     primary_elevation_id = controlpointdata.attribute("primary_elevation_id")
-    primary_coordinate: Optional[QgsFeature] = next(layers.controlpointcoordinate_layer.getFeatures(f"\"id\" = '{primary_coord_id}'"), None)  # type: ignore
+    primary_coordinate: QgsFeature | None = None  # type: ignore []
+    if not not_NULL(primary_coord_id):
+        return None
+    primary_coordinate = next(layers.controlpointcoordinate_layer.getFeatures(f"\"id\" = '{primary_coord_id}'"), None)  # type: ignore []
     if not primary_coordinate:
-        msg = "Fieldrun Shot has no primary coordinate. Invalid for control residuals."
-        raise ValueError(msg)
+        return None
 
     # primary elevation is not required
-    primary_elevation: Optional[QgsFeature] = next(layers.controlpointelevation_layer.getFeatures(f"\"id\" = '{primary_elevation_id}'"), None)  # type: ignore
+    primary_elevation: QgsFeature | None = None
+    if not_NULL(primary_elevation_id):
+        primary_elevation = next(layers.controlpointelevation_layer.getFeatures(f"\"id\" = '{primary_elevation_id}'"), None)  # type: ignore []
 
     fw_easting: float = fw_shot.attribute("easting")
     fw_northing: float = fw_shot.attribute("northing")
@@ -42,7 +48,7 @@ def calc_redisuals(layers: "FieldworkImportLayers", fw_shot: QgsFeature, fr_shot
 
     fr_easting: float = primary_coordinate.attribute("east")
     fr_northing: float = primary_coordinate.attribute("north")
-    fr_elevation: Optional[float] = primary_elevation.attribute("elev") if primary_elevation else None
+    fr_elevation: float | None = primary_elevation.attribute("elev") if primary_elevation else None
 
     return (
         fr_easting - fw_easting,
@@ -57,11 +63,11 @@ class MatchControlItem(QWidget, Ui_match_control_item):
 
     def __init__(
         self,
-        layers: "FieldworkImportLayers",
+        layers: FieldworkImportLayers,
         fieldwork_shot: QgsFeature,
         suggested_fieldrun_shots: list[QgsFeature],
-        allow_create_new: bool,
-        parent: Optional[QWidget] = None,
+        allow_create_new: bool,  # noqa: FBT001
+        parent: QWidget | None = None,
     ):
         super().__init__(parent)
         self.setupUi(self)
@@ -111,13 +117,19 @@ class MatchControlItem(QWidget, Ui_match_control_item):
     def add_suggestion_radio(self, suggestion_fieldrun_shot: QgsFeature):
         radio = QRadioButton()
         suggestion_name = suggestion_fieldrun_shot.attribute("name")
-        residuals = calc_redisuals(self.layers, self.fieldwork_shot, suggestion_fieldrun_shot)
-        radio.setText(f"{suggestion_name} - ({residuals[0]:.3f}, {residuals[1]:.3f}, {round(residuals[2], 3) if residuals[2] else 'N/A'})")
-        radio.feature = suggestion_fieldrun_shot  # type: ignore []
+        try:
+            residuals = calc_redisuals(self.layers, self.fieldwork_shot, suggestion_fieldrun_shot)
+        except ValueError as e:
+            QgsMessageLog.logMessage(str(e))
+            return
+        if residuals:
+            radio.setText(f"{suggestion_name} - ({residuals[0]:.3f}, {residuals[1]:.3f}, {round(residuals[2], 3) if residuals[2] else 'N/A'})")  # noqa: E501
+        else:
+            radio.setText(f"{suggestion_name} - New Control (UNPUBLISHED)")
+        radio.feature = suggestion_fieldrun_shot  # type: ignore [] []
         self.verticalLayout_8.insertWidget(0, radio)
 
-    def get_result(self) -> Optional[ControlMatchResult]:  # noqa: FA100
-        QgsMessageLog.logMessage("get_result", level=Qgis.MessageLevel.Info)
+    def get_result(self) -> ControlMatchResult | None:
         if self.create_new_radio.isChecked():
             name = self.create_new_input.text()
             if not name:
@@ -136,10 +148,7 @@ class MatchControlItem(QWidget, Ui_match_control_item):
                 feature,
                 None,
             )
-        QgsMessageLog.logMessage(f"before for {self.verticalLayout_8.count()}", level=Qgis.MessageLevel.Info)
-        QgsMessageLog.logMessage(f"before for {self.verticalLayout_8.children()=}", level=Qgis.MessageLevel.Info)
         for i in range(self.verticalLayout_8.count()):
-            QgsMessageLog.logMessage("in for", level=Qgis.MessageLevel.Info)
             child = self.verticalLayout_8.itemAt(i).widget()
 
             if isinstance(child, QRadioButton) and child.isChecked() and hasattr(child, "feature"):
