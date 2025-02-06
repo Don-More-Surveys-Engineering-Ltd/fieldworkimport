@@ -16,7 +16,7 @@ jobs:
       - name: Set up Python 3.8
         uses: actions/setup-python@v1
         with:
-          python-version: 3.8
+          python-version: 3.9
 
       #    Needed if the plugin is using Transifex, to have the lrelease command
       #    - name: Install Qt lrelease
@@ -28,4 +28,4 @@ jobs:
       # When osgeo upload is wanted: --osgeo-username usrname --osgeo-password ${{ secrets.OSGEO_PASSWORD }}
       # When Transifex is wanted: --transifex-token ${{ secrets.TRANSIFEX_TOKEN }}
       - name: Deploy plugin
-        run: qgis-plugin-ci release ${GITHUB_REF/refs\/tags\//} --github-token ${{ secrets.GITHUB_TOKEN }} --disable-submodule-update
+        run: qgis-plugin-ci release ${GITHUB_REF/refs\/tags\//} --github-token ${{ secrets.GITHUB_TOKEN }} --disable-submodule-update --create-plugin-repo
