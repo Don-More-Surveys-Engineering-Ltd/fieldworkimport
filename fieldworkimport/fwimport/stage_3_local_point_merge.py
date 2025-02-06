@@ -2,17 +2,14 @@
 
 import math
 from collections.abc import Generator, Iterable, Sequence
-from typing import TYPE_CHECKING, Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeVar
 
-from qgis.core import QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsVectorLayer
+from qgis.core import QgsFeature, QgsFeatureRequest, QgsMessageLog, QgsSettings, QgsVectorLayer
 
+from fieldworkimport.common import get_average_point
 from fieldworkimport.exceptions import AbortError
-from fieldworkimport.fwimport.merge_helpers import get_average_point
+from fieldworkimport.helpers import assert_true, settings_key
 from fieldworkimport.ui.same_point_shots_dialog import SamePointShotsDialog
-
-if TYPE_CHECKING:
-    from fieldworkimport.plugin import PluginInput
-
 
 _GC_T = TypeVar("_GC_T")
 
@@ -20,19 +17,20 @@ _GC_T = TypeVar("_GC_T")
 def should_be_averaged_together(
     p1: QgsFeature,
     p2: QgsFeature,
-    plugin_input: "PluginInput",
+    same_point_tolerance: float,
+    control_point_codes: list[str],
 ) -> bool:
     """Return True if the two coords belong in an averaging group together."""  # noqa: DOC201
-    # QgsMessageLog.logMessage(f"CMP: {p1.attribute('name')} -> {p2.attribute('name')}")
+    # QgsMessageLog.logMessage(f"CMP: {p1['name')] -> {p2['name')}"]
 
-    p1_code = p1.attribute("code")
-    p2_code = p2.attribute("code")
-    p1_parent_point_id = p1.attribute("parent_point_id")
-    p2_parent_point_id = p2.attribute("parent_point_id")
-    p1_easting = p1.attribute("easting")
-    p2_easting = p2.attribute("easting")
-    p1_northing = p1.attribute("northing")
-    p2_northing = p2.attribute("northing")
+    p1_code = p1["code"]
+    p2_code = p2["code"]
+    p1_parent_point_id = p1["parent_point_id"]
+    p2_parent_point_id = p2["parent_point_id"]
+    p1_easting = p1["easting"]
+    p2_easting = p2["easting"]
+    p1_northing = p1["northing"]
+    p2_northing = p2["northing"]
 
     # If already averaged (the user went back?) skip
     if p1_parent_point_id or p2_parent_point_id:
@@ -44,9 +42,9 @@ def should_be_averaged_together(
         return False
 
     # Within tolerance
-    if p1_code in plugin_input.control_point_codes:
-        p1_elevation = p1.attribute("elevation")
-        p2_elevation = p2.attribute("elevation")
+    if p1_code in control_point_codes:
+        p1_elevation = p1["elevation"]
+        p2_elevation = p2["elevation"]
         # factor elevation into distance calc if control point for 3d calculations
         distance = math.sqrt(
             (p2_easting - p1_easting) ** 2
@@ -57,7 +55,7 @@ def should_be_averaged_together(
         # if not control point, just use 2d calculations
         distance = math.sqrt((p2_easting - p1_easting) ** 2 + (p2_northing - p1_northing) ** 2)
 
-    return not distance > plugin_input.same_point_tolerance
+    return not distance > same_point_tolerance
 
 
 def _group_consecutively(iterable: Iterable[_GC_T], comparator: Callable[[_GC_T, _GC_T], bool]) -> Generator[list[_GC_T], Any, None]:  # noqa: E501
@@ -79,13 +77,15 @@ def _group_consecutively(iterable: Iterable[_GC_T], comparator: Callable[[_GC_T,
 
 def find_groups_of_same_shots(
     points: Sequence[QgsFeature],
-    plugin_input: "PluginInput",
 ) -> list[list[QgsFeature]]:
+    s = QgsSettings()
+
     def is_same_group(p1: QgsFeature, p2: QgsFeature) -> bool:
         return should_be_averaged_together(
             p1,
             p2,
-            plugin_input,
+            float(s.value(settings_key("same_point_tolerance"))),
+            s.value(settings_key("control_point_codes")).split(","),
         )
 
     # Consecutive
@@ -95,29 +95,27 @@ def find_groups_of_same_shots(
 def create_averaged_point(
     fieldworkshot_layer: QgsVectorLayer,
     group: list[QgsFeature],
-    plugin_input: "PluginInput",
 ):
     fields = fieldworkshot_layer.fields()
     parent_point_id_index = fields.indexFromName("parent_point_id")
 
     # get avg point of group
-    avg_point = get_average_point(fieldworkshot_layer, group, plugin_input)
-    avg_point_id = avg_point.attribute("id")
+    avg_point = get_average_point(fieldworkshot_layer, group)
+    avg_point_id = avg_point["id"]
 
     # add avg point to layer
-    fieldworkshot_layer.addFeature(avg_point)
+    assert_true(fieldworkshot_layer.addFeature(avg_point), "Failed to add average fieldwork shot.")
 
     # parent each child point with avg point
     for point in group:
         point[parent_point_id_index] = avg_point_id
         # update feature on layer
-        fieldworkshot_layer.updateFeature(point)
+        assert_true(fieldworkshot_layer.updateFeature(point), "Failed to update child fieldwork shot.")
 
 
 def local_point_merge(
     fieldworkshot_layer: QgsVectorLayer,
     fieldwork_id: int,
-    plugin_input: "PluginInput",
 ):
     QgsMessageLog.logMessage(
         "Local point merge started.",
@@ -132,10 +130,9 @@ def local_point_merge(
 
     groups = find_groups_of_same_shots(
         points,
-        plugin_input,
     )
 
-    dialog = SamePointShotsDialog(fieldworkshot_layer, groups=groups, plugin_input=plugin_input)
+    dialog = SamePointShotsDialog(fieldworkshot_layer, groups=groups)
     return_code = dialog.exec_()
     if return_code == dialog.Rejected:
         msg = "Aborted during local point merge stage."
@@ -143,4 +140,4 @@ def local_point_merge(
 
     final_groups = dialog.final_groups
     for group in final_groups:
-        create_averaged_point(fieldworkshot_layer, group, plugin_input)
+        create_averaged_point(fieldworkshot_layer, group)

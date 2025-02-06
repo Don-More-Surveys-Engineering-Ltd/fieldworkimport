@@ -29,7 +29,7 @@ class PublishControlItem(QWidget, Ui_PublishControlItem):
 
         self.fieldwork_shot = fieldwork_shot
         self.fieldrun_shot = next(self.fieldrunshot_layer.getFeatures(
-            QgsFeatureRequest(QgsExpression(f"id = '{self.fieldwork_shot.attribute('matching_fieldrun_shot_id')}'"))
+            QgsFeatureRequest(QgsExpression(f"id = '{self.fieldwork_shot['matching_fieldrun_shot_id']}'"))
             .setLimit(1),
         ))  # type: ignore
 
@@ -39,8 +39,8 @@ class PublishControlItem(QWidget, Ui_PublishControlItem):
         self.elevation_system_input.setFilterExpression('"active" = true')
 
         # set groupBox title
-        fieldrun_shot_name = self.fieldrun_shot.attribute("name")
-        fieldrun_shot_description = self.fieldrun_shot.attribute("description")
+        fieldrun_shot_name = self.fieldrun_shot["name"]
+        fieldrun_shot_description = self.fieldrun_shot["description"]
         self.groupBox.setTitle(fieldrun_shot_name)
         self.control_name_input.setText(fieldrun_shot_name)
         self.control_description_input.setPlainText(fieldrun_shot_description)

@@ -7,7 +7,7 @@ from PyQt5.QtWidgets import QRadioButton, QWidget
 from qgis.core import QgsFeature, QgsMessageLog
 
 from fieldworkimport.exceptions import AbortError
-from fieldworkimport.helpers import not_NULL
+from fieldworkimport.helpers import nullish
 from fieldworkimport.ui.generated.match_control_item import Ui_match_control_item
 
 if TYPE_CHECKING:
@@ -23,37 +23,27 @@ class ControlMatchResult:
 
 
 def calc_redisuals(layers: "FieldworkImportLayers", fw_shot: QgsFeature, fr_shot: QgsFeature) -> tuple[float, float, float | None] | None:  # noqa: D103, E501, UP037
-    fr_shot_id = fr_shot.attribute("id")
+    fr_shot_id = fr_shot["id"]
     controlpointdata: QgsFeature | None = next(layers.controlpointdata_layer.getFeatures(f"\"fieldrun_shot_id\" = '{fr_shot_id}'"), None)  # type: ignore []  # noqa: E501
     if not controlpointdata:
         msg = "Fieldrun Shot has no control point data. Invalid for control residuals."
         raise ValueError(msg)
-    primary_coord_id = controlpointdata.attribute("primary_coord_id")
-    primary_elevation_id = controlpointdata.attribute("primary_elevation_id")
-    primary_coordinate: QgsFeature | None = None  # type: ignore []
-    if not not_NULL(primary_coord_id):
+
+    fr_easting: float = controlpointdata["easting"]
+    fr_northing: float = controlpointdata["northing"]
+    fr_elevation: float = controlpointdata["elevation"]
+
+    if nullish(fr_easting) or nullish(fr_northing):
         return None
-    primary_coordinate = next(layers.controlpointcoordinate_layer.getFeatures(f"\"id\" = '{primary_coord_id}'"), None)  # type: ignore []
-    if not primary_coordinate:
-        return None
 
-    # primary elevation is not required
-    primary_elevation: QgsFeature | None = None
-    if not_NULL(primary_elevation_id):
-        primary_elevation = next(layers.controlpointelevation_layer.getFeatures(f"\"id\" = '{primary_elevation_id}'"), None)  # type: ignore []
-
-    fw_easting: float = fw_shot.attribute("easting")
-    fw_northing: float = fw_shot.attribute("northing")
-    fw_elevation: float = fw_shot.attribute("elevation")
-
-    fr_easting: float = primary_coordinate.attribute("east")
-    fr_northing: float = primary_coordinate.attribute("north")
-    fr_elevation: float | None = primary_elevation.attribute("elev") if primary_elevation else None
+    fw_easting: float = fw_shot["easting"]
+    fw_northing: float = fw_shot["northing"]
+    fw_elevation: float = fw_shot["elevation"]
 
     return (
         fr_easting - fw_easting,
         fr_northing - fw_northing,
-        (fr_elevation - fw_elevation) if fr_elevation else None,
+        (fr_elevation - fw_elevation) if not nullish(fr_elevation) else None,
     )
 
 
@@ -82,8 +72,8 @@ class MatchControlItem(QWidget, Ui_match_control_item):
         self.allow_create_new = allow_create_new
 
         # set groupBox title
-        fieldwork_shot_name = self.fieldwork_shot.attribute("name")
-        fieldwork_shot_description = self.fieldwork_shot.attribute("description")
+        fieldwork_shot_name = self.fieldwork_shot["name"]
+        fieldwork_shot_description = self.fieldwork_shot["description"]
         self.groupbox.setTitle(f"{fieldwork_shot_name} - {fieldwork_shot_description}")
 
         # hide inputs by default until checked
@@ -116,7 +106,7 @@ class MatchControlItem(QWidget, Ui_match_control_item):
 
     def add_suggestion_radio(self, suggestion_fieldrun_shot: QgsFeature):
         radio = QRadioButton()
-        suggestion_name = suggestion_fieldrun_shot.attribute("name")
+        suggestion_name = suggestion_fieldrun_shot["name"]
         try:
             residuals = calc_redisuals(self.layers, self.fieldwork_shot, suggestion_fieldrun_shot)
         except ValueError as e:

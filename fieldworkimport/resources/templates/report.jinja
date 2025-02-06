@@ -4,10 +4,12 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<!-- Latex stylesheet docs: https://latex.vercel.app/ -->
-	<link rel="stylesheet" href="https://latex.vercel.app/style.css">
-	<link rel="stylesheet" href="https://latex.vercel.app/prism/prism.css">
+	<!--<link rel="stylesheet" href="https://latex.vercel.app/style.css">-->
+	<!--<link rel="stylesheet" href="https://latex.vercel.app/prism/prism.css">-->
 	<title>Final Fieldwork Report</title>
 	<style>
+		{% include "latex.css" %}
+
 		@media print {
 			body {
 				zoom: 80%;
@@ -61,7 +63,8 @@
 	</style>
 </head>
 
-{% set LOC_FILE_USED = not nullish(fw.attribute("LOC_grid_easting")) %}
+{% set LOC_FILE_USED = not nullish(fw["LOC_description"]) %}
+{% set SUM_FILE_USED = not nullish(fw["SUM_geoid_seperation"]) %}
 
 <body>
 	<header>
@@ -78,13 +81,13 @@
 		{% if client_name %}
 		<p><b>Client:</b> {{ client_name }}</p>
 		{% endif %}
-		<p style="margin-top: 0.75cm;"><b>Fieldwork:</b> {{fw|attr('name')}}</p>
-		{% set dt_str = fw.attribute("RW5_datetime") %}
+		<p style="margin-top: 0.75cm;"><b>Fieldwork:</b> {{fw.name}}</p>
+		{% set dt_str = fw["RW5_datetime"] %}
 		{% if not nullish(dt_str) %}
 		{% set dt = dt_str.toPyDateTime() %}
 		<p><b>Date of Fieldwork:</b> {{dt.strftime("%B %d, %Y")}}</p>
 		{% endif %}
-		<p style="white-space: pre-line;"><b>Equipment:</b> {{fw|attr('equipment_string')}}</p>
+		<p style="white-space: pre-line;"><b>Equipment:</b> {{fw.equipment_string}}</p>
 		<p style="margin-top: 0.75cm;">Shots:</p>
 		<p>{{shots_summary_str}}</p>
 		<p>Observed Controls:</p>
@@ -150,7 +153,7 @@
 			<h2 id="control-summary">Control Summary</h2>
 			<section>
 				<h3 id="coordinate-summary">Coordinate Shift</h3>
-				{% set shift_type = fw|attr("shift_type")%}
+				{% set shift_type = fw.shift_type%}
 				{% if shift_type == "NONE" %}
 				<p>
 					No shift was applied to the coordinates in this fieldwork.
@@ -161,11 +164,11 @@
 					<!-- Control shift -->
 					A control point shift was applied to the coordinates in this fieldwork.
 					The shift was calculated as the difference between the following known control points
-					and their corrosponding shots captured in this fieldwork:
+					and their corresponding shots captured in this fieldwork:
 					<ul>
 					{% for i in coordinate_shift.shift_controls %}
 						<li>
-							{{ i.fr_shot|attr("name") }}
+							{{ i.fr_shot.name }}
 						</li>
 					{% endfor %}
 					</ul>
@@ -173,34 +176,40 @@
 					<!-- HPN shift -->
 					A HPN shift was calculated and applied to the coordinates in this fieldwork.
 					The shift was calculated factoring in the reference coordinate,
-					the coordinate and geoid seperation values found in the summary file from
+					the coordinate and geoid separation values found in the summary file from
 					NRCAN{% if LOC_FILE_USED %}, and the measured/grid coordinates that can be found in the
 					localization file{% endif %}.
 					{% endif %}
 					<br>
 					The applied shift is as follows:
 					<ul>
-						<li>East {{fw|attr("easting_shift")|round(3)}}m</li>
-						<li>North {{fw|attr("northing_shift")|round(3)}}m</li>
-						<li>Elevation {{fw|attr("elevation_shift")|round(3)}}m</li>
+						<li>East {{fw.easting_shift|round(3)}}m</li>
+						<li>North {{fw.northing_shift|round(3)}}m</li>
+						<li>Elevation {{fw.elevation_shift|round(3)}}m</li>
 					</ul>
 				</p>
 				{% endif %}
 			</section>
-			{# <section>
+			<section>
 				<h3 id="localization">Localization</h3>
 				{% if LOC_FILE_USED %}
 				<p>
-					The fieldwork was localized to the point described as <b>{{fw|attr("LOC_description")}}</b>,
+					The fieldwork was localized to the point described as <b>{{fw.LOC_description}}</b>,
 					which was measured in the field to have the following coordinate:
 				</p>
-				{# <pre><code>({{parsed_loc_file.grid_point.0|floatformat:4}}, {{parsed_loc_file.grid_point.1|floatformat:4}}, {{parsed_loc_file.grid_point.2|floatformat:4}})</code></pre> #}
+				<pre><code>({{fw.LOC_measured_easting|round(4)}}, {{fw.LOC_measured_northing|round(4)}}, {{fw.LOC_measured_elevation|round(4)}})</code></pre>
+				{# The grid coordinates are only availabled when a SUM file is provided to convert the elevation usign it's geoid seperation #}
+				{% if SUM_FILE_USED %}
 				<p>
 					The known (grid) coordinate for the same point is:
 				</p>
-				{# <pre><code>({{parsed_loc_file.measured_point.0|floatformat:4}}, {{parsed_loc_file.measured_point.1|floatformat:4}}, {{parsed_loc_file.measured_point.2|floatformat:4}})</code></pre> #}
-				<p>The residuals (grid - measured coordinates) is as follows:</p>
-				{# <pre><code>({{parsed_loc_file.residuals.0|floatformat:4}}, {{parsed_loc_file.residuals.1|floatformat:4}}, {{parsed_loc_file.residuals.2|floatformat:4}})</code></pre> #}
+				<pre><code>({{fw.LOC_grid_easting|round(4)}}, {{fw.LOC_grid_northing|round(4)}}, {{fw.LOC_grid_elevation|round(4)}})</code></pre>
+				{% else %}
+				<p>
+					As a SUM file was not provided, the GRID coordinate used in this localization cannot be displayed in meters (the geoid seperation from the SUM file is needed).
+					The GRID coordinate in its raw form can be seen in the raw data section of the report, though.
+				</p>
+				{% endif %}
 				{% else %}
 				<p>No LOC file was provided for this fieldwork.</p>
 				{% endif %}
@@ -211,31 +220,45 @@
 					<tbody>
 						<tr>
 							<th scope="col">Name</th>
-							<th scope="col">Existing</th>
+							<th scope="col">Published</th>
 							<th scope="col">Observed</th>
 							<th scope="col">Residual</th>
 						</tr>
-						{% for control in fw.existing_controls %}
+						{% for control in observed_controls %}
 						<tr>
-							<th scope="row">{{control.matched_survey_point.name}}</th>
+							<th scope="row">{{control.fr_shot.name}}</th>
 							<td>
+								{% set p_east = control.control_point_data.easting %}
+								{% set p_north = control.control_point_data.northing %}
+								{% set p_elev = control.control_point_data.elevation %}
+								{% set o_east = control.fw_shot.easting %}
+								{% set o_north = control.fw_shot.northing %}
+								{% set o_elev = control.fw_shot.elevation %}
 								<div>
-									{{control.matched_survey_point.control_point_data.primary_coord.east}}<br>
-									{{control.matched_survey_point.control_point_data.primary_coord.north}}<br>
-									{{control.matched_survey_point.control_point_data.primary_elevation.elev}}
+									{{p_east|round(3)}}<br>
+									{{p_north|round(3)}}<br>
+									{% if not nullish(p_elev) %}
+									{{p_elev|round(3)}}
+									{% else %}
+									Not Set
+									{% endif %}
 								</div>
 							</td>
 							<td>
 								<div>
-									{# {{control.E|floatformat:3}}<br>
-									{{control.N|floatformat:3}}<br>
-									{{control.Z|floatformat:3}} #}
+									{{o_east|round(3)}}<br>
+									{{o_north|round(3)}}<br>
+									{{o_elev|round(3)}}
 								</div>
 							</td>
 							<td>
-								{# {{control.control_point_residuals.0|floatformat:3}}<br>
-								{{control.control_point_residuals.1|floatformat:3}}<br>
-								{{control.control_point_residuals.2|floatformat:3}} #}
+								{{(p_east-o_east)|round(3)}}<br>
+								{{(p_north-o_north)|round(3)}}<br>
+								{% if not nullish(p_elev) %}
+								{{(p_elev-o_elev)|round(3)}}
+								{% else %}
+								{{(o_elev * -1)|round(3)}}
+								{% endif %}
 							</td>
 						</tr>
 						{% endfor %}
@@ -250,42 +273,37 @@
 							<th scope="col">Name</th>
 							<th scope="col">Observed</th>
 						</tr>
-						{% for control in fw.existing_controls %}
+						{% for control in new_controls %}
 						<tr>
-							<th scope="row">{{control.matched_survey_point.name}}</th>
+							<th scope="row">{{control.fr_shot.name}}</th>
 							<td>
 								<div>
-									{# {{control.E|floatformat:3}}<br>
-									{{control.N|floatformat:3}}<br>
-									{{control.Z|floatformat:3}} #}
+									{{control.fw_shot.easting|round(3)}}<br>
+									{{control.fw_shot.northing|round(3)}}<br>
+									{{control.fw_shot.elevation|round(3)}}
 								</div>
 							</td>
 						</tr>
 						{% endfor %}
 					</tbody>
 				</table>
-			</section> #}
+			</section>
 		</section>
-		{# <section class="page">
+		<section class="page">
 			<h2 id="processing-summary">Processing Summary</h2>
 			<section>
 				<h3 id="averaged-points">Averaged Points</h3>
 				<p>The following tables each represent points that were created as averages of other continuous,
-					same-code, and within same-shot tolerance ({{ settings.same_point_tolerance }}m) points.</p>
+					same-code points.</p>
 
-				{% for avg_point in fw.points.all %}
-				{% if avg_point.averaged_from.exists %}
+				{% for avg in averaged_shots %}
+				{% set parent_east = avg.parent_shot.easting %}
+				{% set parent_north = avg.parent_shot.northing %}
+				{% set parent_elev = avg.parent_shot.elevation %}
 				<table style="margin-top: .75cm;">
-					{% if avg_point.matched_survey_point %}
 					<caption>
-						The points that were averaged into <em>control point</em>
-						<b>{{avg_point.matched_survey_point.name}}</b>.
+						The points that were averaged into <b>{{avg.parent_shot.name}}</b>.
 					</caption>
-					{% else %}
-					<caption>
-						The points that were averaged into <b>{{avg_point.P}}</b>.
-					</caption>
-					{% endif %}
 					<thead>
 						<tr>
 							<th>Point</th>
@@ -297,18 +315,21 @@
 						</tr>
 					</thead>
 					<tbody>
-						{% for point in avg_point.averaged_from.all %}
+						{% for child in avg.child_shots %}
+						{% set child_east = child.easting %}
+						{% set child_north = child.northing %}
+						{% set child_elev = child.elevation %}
 						<tr>
-							<td>{{point.P}}</td>
-							<td>{{point.final_code}}</td>
-							{# <td>{{point.E|floatformat:3}}</td>
-							<td>{{point.N|floatformat:3}}</td>
-							<td>{{point.Z|floatformat:3}}</td> #}
+							<td>{{child.name}}</td>
+							<td>{{child.full_code}}</td>
+							<td>{{child_east|round(3)}}</td>
+							<td>{{child_north|round(3)}}</td>
+							<td>{{child_elev|round(3)}}</td>
 							<td>
 								<div>
-									{# {{point.residuals_from_avg.0|floatformat:3}},
-									{{point.residuals_from_avg.1|floatformat:3}},
-									{{point.residuals_from_avg.2|floatformat:3}} #}
+									{{(parent_east-child_east)|round(3)}},
+									{{(parent_north-child_north)|round(3)}},
+									{{(parent_elev-child_elev)|round(3)}}
 								</div>
 							</td>
 						</tr>
@@ -316,16 +337,15 @@
 					</tbody>
 					<tfoot>
 						<tr>
-							<th>{{avg_point.P}}</th>
-							<th>{{avg_point.final_code}}</th>
-							{# <th>{{avg_point.E|floatformat:3}}</th>
-							<th>{{avg_point.N|floatformat:3}}</th>
-							<th>{{avg_point.Z|floatformat:3}}</th> #}
+							<th>{{avg.parent_shot.name}}</th>
+							<th>{{avg.parent_shot.code}}</th>
+							<td>{{parent_east|round(3)}}</td>
+							<td>{{parent_north|round(3)}}</td>
+							<td>{{parent_elev|round(3)}}</td>
 							<th></th>
 						</tr>
 					</tfoot>
 				</table>
-				{% endif %}
 				{% endfor %}
 			</section>
 			<section>
@@ -343,15 +363,17 @@
 							</tr>
 						</thead>
 						<tbody>
-							{% for point in fw.points.all %}
-							{% if point.bad_code %}
+							{% for point in final_shots %}
+							{% if point.bad_code_flag %}
+							{% set og_code = point.original_code %}
+							{% set new_code = point.full_code %}
 							<tr>
-								<th scope="row">{{point.P}}</th>
-								<td>{{point.code}}</td>
+								<th scope="row">{{point.name}}</th>
+								<td>{{og_code}}</td>
 								<td>
 									<small>
-										{% if point.overwritten_code and point.overwritten_code != point.code %}
-										Code was corrected to "{{ point.overwritten_code }}".
+										{% if og_code != new_code %}
+										Code was corrected to "{{ new_code }}".
 										{% else %}
 										Error was ignored, code is still invalid.
 										{% endif %}
@@ -369,10 +391,7 @@
 						tolerance HRMS, VRMS, or a non-fixed status.</p>
 					<table style="margin-top: .5cm;">
 						<caption>
-							Where the HRMS tolerance is {{settings.hrms_tolerance}} and the VRMS tolerance is
-							{{settings.vrms_tolerance}}. Cells marked like <span class="mark">this</span> indicate a
-							poor
-							coordinate quality marker.
+							Cells marked like <span class="mark">this</span> indicate a poor coordinate quality marker.
 						</caption>
 						<thead>
 							<tr>
@@ -383,45 +402,52 @@
 								<th>HDOP</th>
 								<th>VDOP</th>
 								<th>PDOP</th>
-								<th>Entered Rod Height</th>
+								<th>Rod Height</th>
+								<th>Instrument Height</th>
+								<th>Instrument Type</th>
 							</tr>
 						</thead>
 						<tbody>
-							{% for point in fw.points.all %}
-							{% if point.bad_hrms or point.bad_vrms or point.bad_fixed_status %}
+							{% for point in final_shots %}
+							{% set bad_hrms = point.bad_hrms_flag %}
+							{% set bad_vrms = point.bad_vrms_flag %}
+							{% set bad_fixed_status = point.bad_fixed_status_flag %}
+							{% if bad_hrms or bad_vrms or bad_fixed_status %}
 							<tr>
-								<th scope="row">{{point.P}}</th>
+								<th scope="row">{{point.name}}</th>
 								<td>
-									{% if point.bad_hrms %}
+									{% if bad_hrms %}
 									<span class="mark">
-										{# {{ point.hrms|floatformat:3 }} #}
+										{{ point.hrms|round(3) }}
 									</span>
 									{% else %}
-									{# {{ point.hrms|floatformat:3 }} #}
+									{{ point.hrms|round(3) }}
 									{% endif %}
 								</td>
 								<td>
-									{% if point.bad_vrms %}
+									{% if bad_vrms %}
 									<span class="mark">
-										{# {{ point.vrms|floatformat:3 }} #}
+										{{ point.vrms|round(3) }}
 									</span>
 									{% else %}
-									{# {{ point.vrms|floatformat:3 }} #}
+									{{ point.vrms|round(3) }}
 									{% endif %}
 								</td>
 								<td>
-									{% if point.bad_fixed_status %}
+									{% if bad_fixed_status %}
 									<span class="mark">
-										{# {{ point.is_fixed|yesno:'Yes,No' }} #}
+										{{ point.status }}
 									</span>
 									{% else %}
-									{# {{ point.is_fixed|yesno:'Yes,No' }} #}
+									{{ point.status }}
 									{% endif %}
 								</td>
-								{# <td>{{ point.hdop|floatformat:3 }}</td> #}
-								{# <td>{{ point.vdop|floatformat:3 }}</td> #}
-								{# <td>{{ point.pdop|floatformat:3 }}</td> #}
-								{# <td>{{ point.entered_rod_height|floatformat:3 }}</td> #}
+								<td>{{ point.hdop|safe_round(3) }}</td>
+								<td>{{ point.vdop|safe_round(3) }}</td>
+								<td>{{ point.pdop|safe_round(3) }}</td>
+								<td>{{ point.rod_height|safe_round(3) }}</td>
+								<td>{{ point.instrument_height|safe_round(3) }}</td>
+								<td>{{ point.instrument_type }}</td>
 							</tr>
 							{% endif %}
 							{% endfor %}
@@ -433,40 +459,36 @@
 
 		<section class="page">
 			<h2 id="field-run-summary">Field Run Summary</h2>
-			{% if fw.fieldrun_map_screenshot.name %}
-			<figure>
-				<img src="{{fw.fieldrun_map_screenshot_data_uri}}">
-				<figcaption>
-					{% if img.note %}
-					{{img.note}}
-					{% else %}
-					A screenshot of the fieldrun map.
-					{% endif %}
-				</figcaption>
-			</figure>
-			{% endif %}
-			{% for point in fr.points.all %}
+			{% for record in fieldrun_shots %}
+			{% set shot_type = record.shot["type"] %}
+			{% set shot_name = record.shot["name"] %}
+			{% set shot_description = record.shot["description"] %}
+			{% set shot_id = record.shot["id"] %}
+			{% set shot_x = record.shot.geometry().asPoint().x() %}
+			{% set shot_y = record.shot.geometry().asPoint().y() %}
 			<!-- Display smaller if it's a nothing found or instruction point -->
-			{% if point.type in 'Instruction,NothingFound' %}
+			{% if shot_type in 'Instruction,NothingFound' %}
 			<h5 class="fieldrun-point-header">
-				{{ point.name }}
-				[{{point.type}}]
-				{# - ({{point.geom.x|floatformat:5}}, {{point.geom.y|floatformat:5}}) #}
-				"{{ point.note }}"
+				{{ shot_name }}
+				[{{shot_type}}]
+				"{{ shot_description }}"
 			</h5>
 			{% else %}
-			<h4 class="fieldrun-point-header">{{ point.name }} [{{point.type}}]</h4>
-			<blockquote>{{point.note}}</blockquote>
-			<small><code>{{point.id}}</code></small>
+			<h4 class="fieldrun-point-header">{{ shot_name }} [{{shot_type}}]</h4>
+			<blockquote>{{shot_description}}</blockquote>
+			<label for="sn-anything" class="sidenote-toggle">⊕</label>
+			<input type="checkbox" id="sn-anything" class="sidenote-toggle" />
+			<span class="sidenote">({{shot_x|safe_round(5)}}, {{shot_y|safe_round(5)}})</span>
+			<small><code>{{shot_id}}</code></small>
 			{% endif %}
-			{% for img in point.images.all %}
+			{% for img in record.images %}
 			<figure>
-				<img src="{{img.data_uri}}" style="max-height: 4in;">
+				<img src="{{downloadB64(img.public_image_url)}}" style="max-height: 4in;">
 				<figcaption>
 					{% if img.note %}
 					{{img.note}}
 					{% else %}
-					Image of point {{ point.name }}.
+					Image of point {{ shot_name }}.
 					{% endif %}
 				</figcaption>
 			</figure>
@@ -479,87 +501,102 @@
 			<table id="final-coord-table" style="font-size: .85rem !important;">
 				<thead>
 					<tr>
-						<th><small>P.</small></th>
-						<th><small>E.</small></th>
-						<th><small>N.</small></th>
-						<th><small>Elev.</small></th>
-						<th><small>Description</small></th>
-						<th><small>Code</small></th>
-						<th><small>RH</small></th>
-						<th><small>Error</small></th>
-						<th><small>Fixed</small></th>
+						<th>P.</th>
+						<th>E.</th>
+						<th>N.</th>
+						<th>Elev.</th>
+						<th>Description</th>
+						<th>Code</th>
+						<th>RH</th>
+						<th>IH</th>
+						<th>Instrument Type</th>
+						<th>Error</th>
+						<th>Fixed</th>
 					</tr>
 				</thead>
 				<tbody>
-					{% for point in fw.points.all %}
+					{% for point in final_shots %}
 					<tr>
-						<td><small>{{ point.P }}</small></td>
-						{# <td><small>{{ point.shifted_e|floatformat:3 }}</small></td>
-						<td><small>{{ point.shifted_n|floatformat:3 }}</small></td>
-						<td><small>{{ point.shifted_z|floatformat:3 }}</small></td> #}
+						<td>{{ point.name }}</td>
+						<td>{{ point.easting|safe_round(3) }}</td>
+						<td>{{ point.northing|safe_round(3) }}</td>
+						<td>{{ point.elevation|safe_round(3) }}</td>
 						<td>
-							<small>
-								{{ point.description_with_final_code }}
-							</small>
+
+								{{ point.description }}
+
 						</td>
 						<td>
-							<small>
-								{{ point.final_code }}
-							</small>
+
+								{{ point.code }}
+
 						</td>
 						<td>
-							<small>
-								{{ point.entered_rod_height }}
-							</small>
+
+								{{ point.rod_height|safe_round(3) }}
+
+						</td>
+						<td>
+
+								{{ point.instrument_height|safe_round(3) }}
+
+						</td>
+						<td>
+
+								{{ point.instrument_type }}
+
 						</td>
 						<td>
 							<div>
-								<small style="text-wrap: nowrap; white-space: nowrap;">
-									HRMS: {% if point.bad_hrms %}
+								<span style="text-wrap: nowrap; white-space: nowrap;">
+									{% set hrms = point.hrms %}
+									HRMS: {% if point.bad_hrms_flag %}
 									<span class="mark">
-										{# {{ point.hrms|floatformat:3 }} #}
+										{{ hrms|safe_round(3) }}
 									</span>
 									{% else %}
-									{# {{ point.hrms|floatformat:3 }} #}
+									{{ hrms|safe_round(3) }}
 									{% endif %}
-								</small>
+								</span>
 							</div>
 							<div>
-								<small style="text-wrap: nowrap; white-space: nowrap;">
-									VRMS: {% if point.bad_vrms %}
+								<span style="text-wrap: nowrap; white-space: nowrap;">
+									{% set vrms = point.vrms %}
+									VRMS: {% if point.bad_vrms_flag %}
 									<span class="mark">
-										{# {{ point.vrms|floatformat:3 }} #}
+										{{ vrms|safe_round(3) }}
 									</span>
 									{% else %}
-									{# {{ point.vrms|floatformat:3 }} #}
+									{{ vrms|safe_round(3) }}
 									{% endif %}
-								</small>
+								</span>
 							</div>
 							</div>
 							<div>
-								<small style="text-wrap: nowrap; white-space: nowrap;">
-									{# HDOP: {{ point.hdop|floatformat:3 }} #}
-								</small>
+								<span style="text-wrap: nowrap; white-space: nowrap;">
+									HDOP: {{ point.hdop|safe_round(3) }}
+								</span>
 							</div>
 							</div>
 							<div>
-								<small style="text-wrap: nowrap; white-space: nowrap;">
-									{# VDOP: {{ point.vdop|floatformat:3 }} #}
-								</small>
+								<span style="text-wrap: nowrap; white-space: nowrap;">
+									VDOP: {{ point.vdop|safe_round(3) }}
+								</span>
 							</div>
 							<div>
-								<small style="text-wrap: nowrap; white-space: nowrap;">
-									{# PDOP: {{ point.pdop|floatformat:3 }} #}
-								</small>
+								<span style="text-wrap: nowrap; white-space: nowrap;">
+									PDOP: {{ point.pdop|safe_round(3) }}
+								</span>
 							</div>
 						</td>
 						<td>
-							{% if point.bad_fixed_status %}
+							{% set status = point.status %}
+							{% if point.bad_fixed_status_flag %}
 							<span class="mark">
-								{# {{ point.is_fixed|yesno:'Yes,No' }} #}
+								{{ status }}
 							</span>
 							{% else %}
-							{# {{ point.is_fixed|yesno:'Yes,No' }} #}
+							{{ status }}
 							{% endif %}
 						</td>
 					</tr>
@@ -585,7 +622,7 @@
 						</tr>
 					</thead>
 					<tbody>
-						{% for row in crdb_file_rows %}
+						{% for row in crdb_rows %}
 						<tr>
 							<td><small>{{row.P}}</small></td>
 							<td><small>{{row.E}}</small></td>
@@ -601,29 +638,29 @@
 			<section>
 				<h3 id="rw5-file">RW5 File</h3>
 				<small>
-					<code style="white-space: pre; text-wrap: pretty;">{{ rw5_file_contents }}</code>
+					<code style="white-space: pre; text-wrap: pretty;">{{ rw5_raw }}</code>
 				</small>
 			</section>
 			<section>
 				<h3 id="ref-file">REF File</h3>
 				<small>
-					<code style="white-space: pre; text-wrap: pretty;">{{ ref_file_contents }}</code>
+					<code style="white-space: pre; text-wrap: pretty;">{{ ref_raw }}</code>
 				</small>
 			</section>
 			<section>
 				<h3 id="loc-file">LOC File</h3>
 				<small>
-					<code style="white-space: pre; text-wrap: pretty;">{{ loc_file_contents }}</code>
+					<code style="white-space: pre; text-wrap: pretty;">{{ loc_raw }}</code>
 				</small>
 			</section>
 			<section>
 				<h3 id="sum-file">SUM File</h3>
 				<small>
-					<code style="white-space: pre; text-wrap: pretty;">{{ sum_file_contents }}</code>
+					<code style="white-space: pre; text-wrap: pretty;">{{ sum_raw }}</code>
 				</small>
 			</section>
 		</section>
-		{% endif %} #}
+		{% endif %}
 
 	</article>
 </main>

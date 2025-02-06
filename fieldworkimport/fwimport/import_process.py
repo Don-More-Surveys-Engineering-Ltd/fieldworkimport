@@ -15,7 +15,7 @@ from fieldworkimport.fwimport.stage_2_validate_points import correct_codes, show
 from fieldworkimport.fwimport.stage_3_local_point_merge import local_point_merge
 from fieldworkimport.fwimport.stage_4_match_fieldrun import FieldRunMatchStage
 from fieldworkimport.fwimport.stage_5_coordinate_shift import CoordinateShiftStage
-from fieldworkimport.helpers import get_layers_by_table_name, timed
+from fieldworkimport.helpers import assert_true, get_layers_by_table_name, timed
 
 iface: QgisInterface = _iface  # type: ignore
 
@@ -38,8 +38,6 @@ class FieldworkImportLayers:
     fieldworkshot_layer: QgsVectorLayer
     fieldrunshot_layer: QgsVectorLayer
     controlpointdata_layer: QgsVectorLayer
-    controlpointcoordinate_layer: QgsVectorLayer
-    controlpointelevation_layer: QgsVectorLayer
     coordsystem_layer: QgsVectorLayer
     elevationsystem_layer: QgsVectorLayer
 
@@ -58,8 +56,6 @@ class FieldworkImportProcess:
         fieldworkshot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", raise_exception=True, no_filter=True, require_geom=True)[0]
         fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", raise_exception=True, no_filter=True, require_geom=True)[0]
         controlpointdata_layer = get_layers_by_table_name("public", "sites_controlpointdata", raise_exception=True, no_filter=True)[0]
-        controlpointelevation_layer = get_layers_by_table_name("public", "sites_controlpointelevation", raise_exception=True, no_filter=True)[0]
-        controlpointcoordinate_layer = get_layers_by_table_name("public", "sites_controlpointcoordinate", raise_exception=True, no_filter=True)[0]
         coordsystem_layer = get_layers_by_table_name("public", "sites_coordsystem", raise_exception=True, no_filter=True)[0]
         eleavtionsystem_layer = get_layers_by_table_name("public", "sites_elevationsystem", raise_exception=True, no_filter=True)[0]
 
@@ -68,15 +64,11 @@ class FieldworkImportProcess:
             fieldworkshot_layer=fieldworkshot_layer,
             fieldrunshot_layer=fieldrunshot_layer,
             controlpointdata_layer=controlpointdata_layer,
-            controlpointcoordinate_layer=controlpointcoordinate_layer,
-            controlpointelevation_layer=controlpointelevation_layer,
             coordsystem_layer=coordsystem_layer,
             elevationsystem_layer=eleavtionsystem_layer,
         )
 
     def rollback(self):
-        self.layers.controlpointcoordinate_layer.rollBack()
-        self.layers.controlpointelevation_layer.rollBack()
         self.layers.controlpointdata_layer.rollBack()
         self.layers.fieldrunshot_layer.rollBack()
         self.layers.fieldworkshot_layer.rollBack()
@@ -95,35 +87,31 @@ class FieldworkImportProcess:
                     self.plugin_input,
                 )
 
-            fieldwork_id = self.fieldwork_feature.attribute("id")
-            fieldrun_id = self.plugin_input.fieldrun_feature.attribute("id") if self.plugin_input.fieldrun_feature else None
+            fieldwork_id = self.fieldwork_feature["id"]
+            fieldrun_id = self.plugin_input.fieldrun_feature["id"] if self.plugin_input.fieldrun_feature else None
 
             with timed("validate_points"):
                 validate_points(
                     self.layers.fieldworkshot_layer,
                     fieldwork_id=fieldwork_id,
-                    plugin_input=self.plugin_input,
                 )
 
             with timed("correct_codes"):
                 correct_codes(
                     self.layers.fieldworkshot_layer,
                     fieldwork_id=fieldwork_id,
-                    plugin_input=self.plugin_input,
                 )
 
             with timed("show_warnings"):
                 show_warnings(
                     self.layers.fieldworkshot_layer,
                     fieldwork_id=fieldwork_id,
-                    plugin_input=self.plugin_input,
                 )
 
             with timed("local_point_merge"):
                 local_point_merge(
                     self.layers.fieldworkshot_layer,
                     fieldwork_id=fieldwork_id,
-                    plugin_input=self.plugin_input,
                 )
 
             with timed("FieldRunMatchStage"):
@@ -156,8 +144,8 @@ class FieldworkImportProcess:
         fields = self.layers.fieldworkshot_layer.fields()
         is_processed_idx = fields.indexFromName("is_processed")
         points: list[QgsFeature] = [*self.layers.fieldworkshot_layer.getFeatures(
-            f"fieldwork_id = '{self.fieldwork_feature.attribute('id')}'",
+            f"fieldwork_id = '{self.fieldwork_feature['id']}'",
         )]  # type: ignore []
         for point in points:
             point[is_processed_idx] = True
-            self.layers.fieldworkshot_layer.updateFeature(point)
+            assert_true(self.layers.fieldworkshot_layer.updateFeature(point), "Failed to mark fieldwork shot as processed.")

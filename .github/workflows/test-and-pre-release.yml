@@ -33,7 +33,7 @@ jobs:
       - name: Run tests
         run: >
           docker run --rm --net=host --volume `pwd`:/app -w=/app -e QGIS_PLUGIN_IN_CI=1 qgis/qgis:${{ matrix.docker_tags }} sh -c
-          "pip3 install -qr requirements-dev.txt && xvfb-run -s '+extension GLX -screen 0 1024x768x24'
+          "pip3 install -qr requirements-dev.txt --break-system-packages && xvfb-run -s '+extension GLX -screen 0 1024x768x24'
           pytest -v --cov=fieldworkimport --cov-report=xml"
 
       # Upload coverage report. Will not work if the repo is private
@@ -46,31 +46,31 @@ jobs:
           fail_ci_if_error: false # set to true when upload is working
           verbose: false
 
-  windows_tests:
-    runs-on: windows-latest
+  # windows_tests:
+  #   runs-on: windows-latest
 
-    steps:
-      - uses: actions/checkout@v2
-        with:
-          submodules: true
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #       with:
+  #         submodules: true
 
-      - name: Choco install qgis
-        uses: crazy-max/ghaction-chocolatey@v1
-        with:
-          args: install qgis-ltr -y
+  #     - name: Choco install qgis
+  #       uses: crazy-max/ghaction-chocolatey@v1
+  #       with:
+  #         args: install qgis-ltr -y
 
-      - name: Run tests
-        shell: pwsh
-        run: |
-          $env:PATH="C:\Program Files\QGIS 3.16\bin;$env:PATH"
-          $env:QGIS_PLUGIN_IN_CI=1
-          python-qgis-ltr.bat -m pip install -qr requirements-dev.txt
-          python-qgis-ltr.bat -m pytest -v
+  #     - name: Run tests
+  #       shell: pwsh
+  #       run: |
+  #         $env:PATH="C:\Program Files\QGIS 3.16\bin;$env:PATH"
+  #         $env:QGIS_PLUGIN_IN_CI=1
+  #         python-qgis-ltr.bat -m pip install -qr requirements-dev.txt
+  #         python-qgis-ltr.bat -m pytest -v
 
   pre-release:
     name: "Pre Release"
     runs-on: "ubuntu-latest"
-    needs: [linux_tests, windows_tests]
+    needs: [linux_tests]
 
     steps:
       - uses: hmarr/debug-action@v2

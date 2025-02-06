@@ -1,9 +1,7 @@
-import json
 from pathlib import Path
 from typing import Optional
 
 from PyQt5.QtWidgets import QDialog, QMessageBox, QWidget
-from qgis.core import QgsSettings
 
 from fieldworkimport.helpers import get_layers_by_table_name
 from fieldworkimport.ui.generated.new_form_ui import Ui_ImportDialog
@@ -13,7 +11,6 @@ class ImportFieldworkDialog(QDialog, Ui_ImportDialog):
     def __init__(self, parent: Optional[QWidget] = None):  # noqa: FA100
         super().__init__(parent)
         self.setupUi(self)
-        self._set_validation_inputs()
 
         # setup feature picker with layer
         fieldrun_layer = get_layers_by_table_name("public", "sites_fieldrun", no_filter=True, raise_exception=True)[0]
@@ -41,23 +38,6 @@ class ImportFieldworkDialog(QDialog, Ui_ImportDialog):
                     self.loc_file_input.setFilePath(str(loc_path))
 
         self.crdb_file_input.fileChanged.connect(auto_complete_files)
-
-    def _set_validation_inputs(self) -> None:
-        validation_file_key = "dmse/importfieldwork/validation_settings_file"
-        settings = QgsSettings()
-        validation_file_path = settings.value(validation_file_key)
-
-        if not validation_file_path:
-            msg = "QGIS settings is missing validation settings file path."
-            raise ValueError(msg)
-        validation_settings: dict = json.loads(Path(validation_file_path).read_text(encoding="utf-8"))
-        self.hrms_tolerance_input.setValue(validation_settings.get("hrms_tolerance", 0))
-        self.vrms_tolerance_input.setValue(validation_settings.get("vrms_tolerance", 0))
-        self.same_point_tolerance_input.setValue(validation_settings.get("same_point_tolerance", 0))
-        self.valid_codes_input.setPlainText(validation_settings.get("valid_codes", ""))
-        self.valid_special_chars_input.setText(validation_settings.get("valid_special_chars", ""))
-        self.parameterized_special_chars_input.setText(validation_settings.get("parameterized_special_chars", ""))
-        self.control_point_codes_input.setText(validation_settings.get("control_point_codes", ""))
 
     def accept(self) -> None:
         crdb_path = self.crdb_file_input.filePath()

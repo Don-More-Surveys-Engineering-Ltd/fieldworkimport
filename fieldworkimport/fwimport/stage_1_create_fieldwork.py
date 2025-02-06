@@ -25,6 +25,7 @@ from fieldworkimport.exceptions import AbortError
 from fieldworkimport.fwimport.parse_loc_file import parse_loc_file
 from fieldworkimport.fwimport.parse_ref_file import parse_ref_file
 from fieldworkimport.fwimport.parse_sum_file import parse_sum_file
+from fieldworkimport.helpers import assert_true, timed
 
 if TYPE_CHECKING:
     from fieldworkimport.fwimport.import_process import FieldworkImportLayers
@@ -71,116 +72,136 @@ def create_fieldwork(
     QgsMessageLog.logMessage(
         "Create fieldwork started.",
     )
-    timezone = pytz.timezone("America/Halifax")
-    loc_data = None
-    sum_data = None
-    ref_data = None
-    field_run_id = None
-    if plugin_input.sum_path:
-        sum_data = parse_sum_file(Path(plugin_input.sum_path))
-    if plugin_input.loc_path:
-        loc_data = parse_loc_file(Path(plugin_input.loc_path), geoid_seperation=sum_data["geoid_seperation"] if sum_data else None)
-    if plugin_input.ref_path:
-        ref_data = parse_ref_file(Path(plugin_input.ref_path))
-    if plugin_input.fieldrun_feature:
-        field_run_id = plugin_input.fieldrun_feature.attribute("id")
+    with timed("setup create"):
+        timezone = pytz.timezone("America/Halifax")
+        loc_data = None
+        sum_data = None
+        ref_data = None
+        field_run_id = None
+        if plugin_input.sum_path:
+            sum_data = parse_sum_file(Path(plugin_input.sum_path))
+        if plugin_input.loc_path:
+            loc_data = parse_loc_file(Path(plugin_input.loc_path), geoid_seperation=sum_data["geoid_seperation"] if sum_data else None)
+        if plugin_input.ref_path:
+            ref_data = parse_ref_file(Path(plugin_input.ref_path))
+        if plugin_input.fieldrun_feature:
+            field_run_id = plugin_input.fieldrun_feature["id"]
 
-    rw5_rows = rw5_to_csv.convert(rw5_path=Path(plugin_input.rw5_path), output_path=None, tzinfo=timezone)
-    rw5_prelude = rw5_to_csv.prelude(rw5_path=Path(plugin_input.rw5_path))
+        rw5_rows = rw5_to_csv.convert(rw5_path=Path(plugin_input.rw5_path), output_path=None, tzinfo=timezone)
+        rw5_prelude = rw5_to_csv.prelude(rw5_path=Path(plugin_input.rw5_path))
 
-    # check if this has already been imported
-    if warn_against_duplicate_imports(layers.fieldwork_layer, rw5_prelude["JobName"]):
-        # user chose to abort due to duplicate
-        msg = "Aborting due to duplicate import."
-        raise AbortError(msg)
+        # check if this has already been imported
+        if warn_against_duplicate_imports(layers.fieldwork_layer, rw5_prelude["JobName"]):
+            # user chose to abort due to duplicate
+            msg = "Aborting due to duplicate import."
+            raise AbortError(msg)
 
-    crdb_connection = sqlite3.connect(plugin_input.crdb_path)
-    crdb_connection.row_factory = sqlite3.Row
-    cursor = crdb_connection.cursor()
+        crdb_connection = sqlite3.connect(plugin_input.crdb_path)
+        crdb_connection.row_factory = sqlite3.Row
+        cursor = crdb_connection.cursor()
 
-    fieldwork_layer_fields = layers.fieldwork_layer.fields()
-    fieldwork_layer_id_index = fieldwork_layer_fields.indexFromName("id")
-    fieldwork_layer_field_run_id_index = fieldwork_layer_fields.indexFromName("field_run_id")
-    fieldwork_layer_name_index = fieldwork_layer_fields.indexFromName("name")
-    fieldwork_layer_note_index = fieldwork_layer_fields.indexFromName("note")
-    RW5_datetime_index = fieldwork_layer_fields.indexFromName("RW5_datetime")  # noqa: N806
-    LOC_measured_easting_index = fieldwork_layer_fields.indexFromName("LOC_measured_easting")  # noqa: N806
-    LOC_measured_northing_index = fieldwork_layer_fields.indexFromName("LOC_measured_northing")  # noqa: N806
-    LOC_measured_elevation_index = fieldwork_layer_fields.indexFromName("LOC_measured_elevation")  # noqa: N806
-    LOC_grid_easting_index = fieldwork_layer_fields.indexFromName("LOC_grid_easting")  # noqa: N806
-    LOC_grid_northing_index = fieldwork_layer_fields.indexFromName("LOC_grid_northing")  # noqa: N806
-    LOC_grid_elevation_index = fieldwork_layer_fields.indexFromName("LOC_grid_elevation")  # noqa: N806
-    LOC_description_index = fieldwork_layer_fields.indexFromName("LOC_description")  # noqa: N806
-    REF_easting_index = fieldwork_layer_fields.indexFromName("REF_easting")  # noqa: N806
-    REF_northing_index = fieldwork_layer_fields.indexFromName("REF_northing")  # noqa: N806
-    REF_elevation_index = fieldwork_layer_fields.indexFromName("REF_elevation")  # noqa: N806
-    SUM_easting_index = fieldwork_layer_fields.indexFromName("SUM_easting")  # noqa: N806
-    SUM_northing_index = fieldwork_layer_fields.indexFromName("SUM_northing")  # noqa: N806
-    SUM_elevation_index = fieldwork_layer_fields.indexFromName("SUM_elevation")  # noqa: N806
-    SUM_orthometric_system_index = fieldwork_layer_fields.indexFromName("SUM_orthometric_system")  # noqa: N806
-    SUM_orthometric_model_index = fieldwork_layer_fields.indexFromName("SUM_orthometric_model")  # noqa: N806
-    SUM_geoid_seperation_index = fieldwork_layer_fields.indexFromName("SUM_geoid_seperation")  # noqa: N806
-    equipment_string_index = fieldwork_layer_fields.indexFromName("equipment_string")
-    fieldwork_id = str(uuid4())
+        fieldwork_layer_fields = layers.fieldwork_layer.fields()
+        fieldwork_layer_id_index = fieldwork_layer_fields.indexFromName("id")
+        fieldwork_layer_field_run_id_index = fieldwork_layer_fields.indexFromName("field_run_id")
+        fieldwork_layer_name_index = fieldwork_layer_fields.indexFromName("name")
+        fieldwork_layer_note_index = fieldwork_layer_fields.indexFromName("note")
+        RW5_datetime_index = fieldwork_layer_fields.indexFromName("RW5_datetime")  # noqa: N806
+        LOC_measured_easting_index = fieldwork_layer_fields.indexFromName("LOC_measured_easting")  # noqa: N806
+        LOC_measured_northing_index = fieldwork_layer_fields.indexFromName("LOC_measured_northing")  # noqa: N806
+        LOC_measured_elevation_index = fieldwork_layer_fields.indexFromName("LOC_measured_elevation")  # noqa: N806
+        LOC_grid_easting_index = fieldwork_layer_fields.indexFromName("LOC_grid_easting")  # noqa: N806
+        LOC_grid_northing_index = fieldwork_layer_fields.indexFromName("LOC_grid_northing")  # noqa: N806
+        LOC_grid_elevation_index = fieldwork_layer_fields.indexFromName("LOC_grid_elevation")  # noqa: N806
+        LOC_description_index = fieldwork_layer_fields.indexFromName("LOC_description")  # noqa: N806
+        REF_easting_index = fieldwork_layer_fields.indexFromName("REF_easting")  # noqa: N806
+        REF_northing_index = fieldwork_layer_fields.indexFromName("REF_northing")  # noqa: N806
+        REF_elevation_index = fieldwork_layer_fields.indexFromName("REF_elevation")  # noqa: N806
+        SUM_easting_index = fieldwork_layer_fields.indexFromName("SUM_easting")  # noqa: N806
+        SUM_northing_index = fieldwork_layer_fields.indexFromName("SUM_northing")  # noqa: N806
+        SUM_elevation_index = fieldwork_layer_fields.indexFromName("SUM_elevation")  # noqa: N806
+        SUM_orthometric_system_index = fieldwork_layer_fields.indexFromName("SUM_orthometric_system")  # noqa: N806
+        SUM_orthometric_model_index = fieldwork_layer_fields.indexFromName("SUM_orthometric_model")  # noqa: N806
+        SUM_geoid_seperation_index = fieldwork_layer_fields.indexFromName("SUM_geoid_seperation")  # noqa: N806
+        equipment_string_index = fieldwork_layer_fields.indexFromName("equipment_string")
+        fieldwork_id = str(uuid4())
 
-    layers.fieldwork_layer.startEditing()
-    new_fieldwork = QgsVectorLayerUtils.createFeature(layers.fieldwork_layer)
-    new_fieldwork[fieldwork_layer_field_run_id_index] = field_run_id
-    new_fieldwork[fieldwork_layer_id_index] = fieldwork_id
-    new_fieldwork[fieldwork_layer_name_index] = rw5_prelude["JobName"]
-    new_fieldwork[fieldwork_layer_note_index] = ""
-    if rw5_prelude.get("ISODateTime"):
-        dt = datetime.datetime.fromisoformat(rw5_prelude["ISODateTime"])
-        dt = datetime.datetime.combine(dt.date(), dt.time(), timezone)
-        new_fieldwork[RW5_datetime_index] = QDateTime(dt)
-    new_fieldwork[LOC_measured_easting_index] = loc_data["measured_point"][0] if loc_data else None
-    new_fieldwork[LOC_measured_northing_index] = loc_data["measured_point"][1] if loc_data else None
-    new_fieldwork[LOC_measured_elevation_index] = loc_data["measured_point"][2] if loc_data else None
-    new_fieldwork[LOC_grid_easting_index] = loc_data["grid_point"][0] if loc_data and loc_data["grid_point"] is not None else None  # noqa: E501
-    new_fieldwork[LOC_grid_northing_index] = loc_data["grid_point"][1] if loc_data and loc_data["grid_point"] is not None else None  # noqa: E501
-    new_fieldwork[LOC_grid_elevation_index] = loc_data["grid_point"][2] if loc_data and loc_data["grid_point"] is not None else None  # noqa: E501
-    new_fieldwork[LOC_description_index] = loc_data["description"] if loc_data else None
-    new_fieldwork[REF_easting_index] = ref_data[0] if ref_data else None
-    new_fieldwork[REF_northing_index] = ref_data[1] if ref_data else None
-    new_fieldwork[REF_elevation_index] = ref_data[2] if ref_data else None
-    new_fieldwork[SUM_easting_index] = sum_data["point"][0] if sum_data else None
-    new_fieldwork[SUM_northing_index] = sum_data["point"][1] if sum_data else None
-    new_fieldwork[SUM_elevation_index] = sum_data["point"][2] if sum_data else None
-    new_fieldwork[SUM_geoid_seperation_index] = sum_data["geoid_seperation"] if sum_data else None
-    new_fieldwork[SUM_orthometric_model_index] = sum_data["orthometric_model"] if sum_data else None
-    new_fieldwork[SUM_orthometric_system_index] = sum_data["orthometric_system"] if sum_data else None
-    new_fieldwork[equipment_string_index] = rw5_prelude["Equipment"]
+    with timed("create fieldwork"):
+        layers.fieldwork_layer.startEditing()
+        new_fieldwork = QgsVectorLayerUtils.createFeature(layers.fieldwork_layer)
+        new_fieldwork[fieldwork_layer_field_run_id_index] = field_run_id
+        new_fieldwork[fieldwork_layer_id_index] = fieldwork_id
+        new_fieldwork[fieldwork_layer_name_index] = rw5_prelude["JobName"]
+        new_fieldwork[fieldwork_layer_note_index] = ""
+        if rw5_prelude.get("ISODateTime"):
+            dt = datetime.datetime.fromisoformat(rw5_prelude["ISODateTime"])
+            dt = datetime.datetime.combine(dt.date(), dt.time(), timezone)
+            new_fieldwork[RW5_datetime_index] = QDateTime(dt)
+        new_fieldwork[LOC_measured_easting_index] = loc_data["measured_point"][0] if loc_data else None
+        new_fieldwork[LOC_measured_northing_index] = loc_data["measured_point"][1] if loc_data else None
+        new_fieldwork[LOC_measured_elevation_index] = loc_data["measured_point"][2] if loc_data else None
+        new_fieldwork[LOC_grid_easting_index] = loc_data["grid_point"][0] if loc_data and loc_data["grid_point"] is not None else None  # noqa: E501
+        new_fieldwork[LOC_grid_northing_index] = loc_data["grid_point"][1] if loc_data and loc_data["grid_point"] is not None else None  # noqa: E501
+        new_fieldwork[LOC_grid_elevation_index] = loc_data["grid_point"][2] if loc_data and loc_data["grid_point"] is not None else None  # noqa: E501
+        new_fieldwork[LOC_description_index] = loc_data["description"] if loc_data else ""
+        new_fieldwork[REF_easting_index] = ref_data[0] if ref_data else None
+        new_fieldwork[REF_northing_index] = ref_data[1] if ref_data else None
+        new_fieldwork[REF_elevation_index] = ref_data[2] if ref_data else None
+        new_fieldwork[SUM_easting_index] = sum_data["point"][0] if sum_data else None
+        new_fieldwork[SUM_northing_index] = sum_data["point"][1] if sum_data else None
+        new_fieldwork[SUM_elevation_index] = sum_data["point"][2] if sum_data else None
+        new_fieldwork[SUM_geoid_seperation_index] = sum_data["geoid_seperation"] if sum_data else None
+        new_fieldwork[SUM_orthometric_model_index] = sum_data["orthometric_model"] if sum_data else ""
+        new_fieldwork[SUM_orthometric_system_index] = sum_data["orthometric_system"] if sum_data else ""
+        new_fieldwork[equipment_string_index] = rw5_prelude["Equipment"] or ""
 
-    layers.fieldwork_layer.addFeature(new_fieldwork)
+        assert_true(layers.fieldwork_layer.addFeature(new_fieldwork), "Failed to add new fieldwork.")
 
-    fieldworkshot_layer_fields = layers.fieldworkshot_layer.fields()
-    fieldworkshot_layer_id_index = fieldworkshot_layer_fields.indexFromName("id")
-    fieldworkshot_layer_fieldwork_id_index = fieldworkshot_layer_fields.indexFromName("fieldwork_id")
-    fieldworkshot_layer_name_index = fieldworkshot_layer_fields.indexFromName("name")
-    fieldworkshot_layer_datetime_index = fieldworkshot_layer_fields.indexFromName("datetime")
-    fieldworkshot_layer_description_index = fieldworkshot_layer_fields.indexFromName("description")
-    fieldworkshot_layer_code_index = fieldworkshot_layer_fields.indexFromName("code")
-    fieldworkshot_layer_original_code_index = fieldworkshot_layer_fields.indexFromName("original_code")
-    northing_index = fieldworkshot_layer_fields.indexFromName("northing")
-    easting_index = fieldworkshot_layer_fields.indexFromName("easting")
-    elevation_index = fieldworkshot_layer_fields.indexFromName("elevation")
-    number_of_satellites_index = fieldworkshot_layer_fields.indexFromName("number_of_satellites")
-    age_of_corrections_index = fieldworkshot_layer_fields.indexFromName("age_of_corrections")
-    status_index = fieldworkshot_layer_fields.indexFromName("status")
-    HRMS_index = fieldworkshot_layer_fields.indexFromName("HRMS")  # noqa: N806
-    VRMS_index = fieldworkshot_layer_fields.indexFromName("VRMS")  # noqa: N806
-    PDOP_index = fieldworkshot_layer_fields.indexFromName("PDOP")  # noqa: N806
-    HDOP_index = fieldworkshot_layer_fields.indexFromName("HDOP")  # noqa: N806
-    VDOP_index = fieldworkshot_layer_fields.indexFromName("VDOP")  # noqa: N806
-    TDOP_index = fieldworkshot_layer_fields.indexFromName("TDOP")  # noqa: N806
-    GDOP_index = fieldworkshot_layer_fields.indexFromName("GDOP")  # noqa: N806
-    rod_height_index = fieldworkshot_layer_fields.indexFromName("rod_height")
-    instrument_height_index = fieldworkshot_layer_fields.indexFromName("instrument_height")
-    instrument_type_index = fieldworkshot_layer_fields.indexFromName("instrument_type")
+        fieldworkshot_layer_fields = layers.fieldworkshot_layer.fields()
+        fieldworkshot_layer_id_index = fieldworkshot_layer_fields.indexFromName("id")
+        fieldworkshot_layer_fieldwork_id_index = fieldworkshot_layer_fields.indexFromName("fieldwork_id")
+        fieldworkshot_layer_name_index = fieldworkshot_layer_fields.indexFromName("name")
+        fieldworkshot_layer_datetime_index = fieldworkshot_layer_fields.indexFromName("datetime")
+        fieldworkshot_layer_description_index = fieldworkshot_layer_fields.indexFromName("description")
+        fieldworkshot_layer_full_code_index = fieldworkshot_layer_fields.indexFromName("full_code")
+        fieldworkshot_layer_code_index = fieldworkshot_layer_fields.indexFromName("code")
+        fieldworkshot_layer_original_code_index = fieldworkshot_layer_fields.indexFromName("original_code")
+        northing_index = fieldworkshot_layer_fields.indexFromName("northing")
+        easting_index = fieldworkshot_layer_fields.indexFromName("easting")
+        elevation_index = fieldworkshot_layer_fields.indexFromName("elevation")
+        number_of_satellites_index = fieldworkshot_layer_fields.indexFromName("number_of_satellites")
+        age_of_corrections_index = fieldworkshot_layer_fields.indexFromName("age_of_corrections")
+        status_index = fieldworkshot_layer_fields.indexFromName("status")
+        HRMS_index = fieldworkshot_layer_fields.indexFromName("HRMS")  # noqa: N806
+        VRMS_index = fieldworkshot_layer_fields.indexFromName("VRMS")  # noqa: N806
+        PDOP_index = fieldworkshot_layer_fields.indexFromName("PDOP")  # noqa: N806
+        HDOP_index = fieldworkshot_layer_fields.indexFromName("HDOP")  # noqa: N806
+        VDOP_index = fieldworkshot_layer_fields.indexFromName("VDOP")  # noqa: N806
+        TDOP_index = fieldworkshot_layer_fields.indexFromName("TDOP")  # noqa: N806
+        GDOP_index = fieldworkshot_layer_fields.indexFromName("GDOP")  # noqa: N806
+        rod_height_index = fieldworkshot_layer_fields.indexFromName("rod_height")
+        instrument_height_index = fieldworkshot_layer_fields.indexFromName("instrument_height")
+        instrument_type_index = fieldworkshot_layer_fields.indexFromName("instrument_type")
+        was_overwritten_index = fieldworkshot_layer_fields.indexFromName("was_overwritten_flag")
 
     layers.fieldworkshot_layer.startEditing()
 
-    for rw5_row in rw5_rows:
+    for idx, rw5_row in enumerate(rw5_rows):
+        # make sure we're only using the last rw5 row for this point.
+        last_version_of_point_row_idx = idx
+        multiple_versions_of_point_row = False
+        for curr_idx, curr_row in enumerate(rw5_rows):
+            if curr_row["PointID"] == rw5_row["PointID"]:
+                if curr_idx > idx:
+                    last_version_of_point_row_idx = curr_idx
+                if curr_idx != idx:
+                    multiple_versions_of_point_row = True
+        # skip row if there's another newer version later
+        if idx < last_version_of_point_row_idx:
+            continue
+        # we now know we're dealing with the latets version of the rw5 row
+        # make note if there were multiple versions
+        was_overwritten_flag = multiple_versions_of_point_row
+
         crdb_query = cursor.execute("SELECT * FROM Coordinates WHERE P like ?", (rw5_row["PointID"].strip(),))
         crdb_row: sqlite3.Row = crdb_query.fetchone()
 
@@ -189,14 +210,13 @@ def create_fieldwork(
             continue
 
         # code is everything before the / in the description
-        code = crdb_row["D"].split("/")[0]
-
         srcCrs = QgsCoordinateReferenceSystem(2953)
         dstCrs = QgsCoordinateReferenceSystem(4617)
         transform = QgsCoordinateTransform(srcCrs, dstCrs, QgsProject.instance())
-
         geom = QgsPoint(x=crdb_row["E"], y=crdb_row["N"])
         geom.transform(transform)
+        full_code = crdb_row["D"].split("/")[0]
+        point_code = full_code.split(" ")[0]
 
         new_fieldwork_shot = QgsVectorLayerUtils.createFeature(layers.fieldworkshot_layer)
         new_fieldwork_shot[fieldworkshot_layer_id_index] = str(uuid4())
@@ -205,8 +225,9 @@ def create_fieldwork(
             new_fieldwork_shot[fieldworkshot_layer_datetime_index] = QDateTime(rw5_row["DateTime"])
         new_fieldwork_shot[fieldworkshot_layer_name_index] = crdb_row["P"]
         new_fieldwork_shot[fieldworkshot_layer_description_index] = crdb_row["D"]
-        new_fieldwork_shot[fieldworkshot_layer_code_index] = code
-        new_fieldwork_shot[fieldworkshot_layer_original_code_index] = code
+        new_fieldwork_shot[fieldworkshot_layer_original_code_index] = full_code
+        new_fieldwork_shot[fieldworkshot_layer_full_code_index] = full_code
+        new_fieldwork_shot[fieldworkshot_layer_code_index] = point_code
         new_fieldwork_shot[northing_index] = crdb_row["N"]
         new_fieldwork_shot[easting_index] = crdb_row["E"]
         new_fieldwork_shot[elevation_index] = crdb_row["Z"]
@@ -223,8 +244,9 @@ def create_fieldwork(
         new_fieldwork_shot[rod_height_index] = rw5_row["RodHeight"]
         new_fieldwork_shot[instrument_height_index] = rw5_row["InstrumentHeight"]
         new_fieldwork_shot[instrument_type_index] = rw5_row["InstrumentType"]
+        new_fieldwork_shot[was_overwritten_index] = was_overwritten_flag
         new_fieldwork_shot.setGeometry(geom)
-        layers.fieldworkshot_layer.addFeature(new_fieldwork_shot)
+        assert_true(layers.fieldworkshot_layer.addFeature(new_fieldwork_shot), "Failed to add new fieldwork shot.")
 
     # zoom layer to new fieldwork points
     iface.setActiveLayer(layers.fieldworkshot_layer)

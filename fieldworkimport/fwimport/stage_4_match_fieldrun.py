@@ -1,10 +1,19 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from qgis.core import Qgis, QgsFeature, QgsFeatureRequest, QgsGeometry, QgsMessageLog, QgsVectorLayerUtils
-from qgis.PyQt.QtSql import QSqlQuery
+from qgis.core import (
+    QgsCoordinateReferenceSystem,
+    QgsCoordinateTransform,
+    QgsFeature,
+    QgsFeatureRequest,
+    QgsGeometry,
+    QgsMessageLog,
+    QgsProject,
+    QgsSettings,
+    QgsVectorLayerUtils,
+)
 
-from fieldworkimport.helpers import layer_database_connection, not_NULL, progress_dialog, timed
+from fieldworkimport.helpers import assert_true, nullish, progress_dialog, settings_key, timed
 from fieldworkimport.ui.match_control_item import MatchControlItem
 from fieldworkimport.ui.match_to_controls_dialog import MatchToControlsDialog
 
@@ -53,28 +62,28 @@ class FieldRunMatchStage:
         new_fieldrunshot[fields.indexFromName("name")] = name
         new_fieldrunshot[fields.indexFromName("type")] = "Control"
         new_fieldrunshot[fields.indexFromName("field_run_id")] = self.fieldrun_id
-        new_fieldrunshot[fields.indexFromName("description")] = f"{based_on_fieldwork_shot.attribute("description")}\n[Generated to match shot {based_on_fieldwork_shot.attribute('name')}]"  # noqa: E501
+        new_fieldrunshot[fields.indexFromName("description")] = f"{based_on_fieldwork_shot["description"]}\n[Generated to match shot {based_on_fieldwork_shot['name']}]"  # noqa: E501
         geom = QgsGeometry(based_on_fieldwork_shot.geometry())
         new_fieldrunshot.setGeometry(geom)
 
-        self.layers.fieldrunshot_layer.addFeature(new_fieldrunshot)
+        assert_true(self.layers.fieldrunshot_layer.addFeature(new_fieldrunshot), "Failed to add new fieldrun shot.")
 
         new_controlpointdata = QgsVectorLayerUtils.createFeature(self.layers.controlpointdata_layer)
         cpd_fields = self.layers.controlpointdata_layer.fields()
-        new_controlpointdata[cpd_fields.indexFromName("fieldrun_shot_id")] = new_fieldrunshot.attribute("id")
+        new_controlpointdata[cpd_fields.indexFromName("fieldrun_shot_id")] = new_fieldrunshot["id"]
 
-        self.layers.controlpointdata_layer.addFeature(new_controlpointdata)
+        assert_true(self.layers.controlpointdata_layer.addFeature(new_controlpointdata), "Failed to add control point data.")
 
         return new_fieldrunshot
 
     def assign_fr_shot(self, fw_shot: QgsFeature, fr_shot_id: str) -> None:
         """Assign fieldrun show as match for fieldwork shot, and that shot's ancestors."""
         fw_shot[self.fw_matching_fieldrun_shot_id_index] = fr_shot_id
-        self.layers.fieldworkshot_layer.updateFeature(fw_shot)
+        assert_true(self.layers.fieldworkshot_layer.updateFeature(fw_shot), "Failed to assign fieldrun shot match to fieldwork shot.")
 
         # recurse up ancestor tree.
-        parent_point_id = fw_shot.attribute("parent_point_id")
-        if not_NULL(parent_point_id):
+        parent_point_id = fw_shot["parent_point_id"]
+        if not nullish(parent_point_id):
             parent_point = next(self.layers.fieldworkshot_layer.getFeatures(f"id = '{parent_point_id}'"))
             self.assign_fr_shot(parent_point, fr_shot_id)
 
@@ -100,15 +109,15 @@ class FieldRunMatchStage:
                 .setFilterExpression(f'"field_run_id" = {self.fieldrun_id}'),
             ),  # type: ignore []
         ]
-        fr_name_feature_tuples = [(f.attribute("name"), f) for f in fr_points]
+        fr_name_feature_tuples = [(f["name"], f) for f in fr_points]
         fr_name_feature_map = {f[0].strip(): f[1] for f in fr_name_feature_tuples if f[0]}
 
         for fw_shot in fw_points:
-            fw_shot_name = fw_shot.attribute("name")
+            fw_shot_name = fw_shot["name"]
             if fw_shot_name in fr_name_feature_map:
                 fr_shot = fr_name_feature_map[fw_shot_name]
-                fr_shot_id = fr_shot.attribute("id")
-                QgsMessageLog.logMessage(f"Matched {fw_shot.attribute('name')} to field run shot {fr_shot.attribute('name')} based on name.")
+                fr_shot_id = fr_shot["id"]
+                QgsMessageLog.logMessage(f"Matched {fw_shot['name']} to field run shot {fr_shot['name']} based on name.")
 
                 self.assign_fr_shot(fw_shot, fr_shot_id)
 
@@ -117,56 +126,44 @@ class FieldRunMatchStage:
 
         User can either choose a suggestion, choose an "other" point, or provide a name for a new point.
         """
+        s = QgsSettings()
+        control_point_codes = s.value(settings_key("control_point_codes")).split(",")
+        qgsproj = QgsProject.instance()
+        assert qgsproj
         dialog = MatchToControlsDialog()
 
         allow_create_new = self.fieldrun_id is not None
 
         # find control-type fieldwork shots that need fieldrunshot matches.
-        cp_code_clause = " OR ".join([f"\"code\" like '{code}'" for code in self.plugin_input.control_point_codes])
+        cp_code_clause = " OR ".join([f"\"code\" like '{code}'" for code in control_point_codes])
         # Points with a cp code (mon or cp), are parent points, and are of the current fieldwork.
         fw_controls_needing_matches: list[QgsFeature] = [*self.layers.fieldworkshot_layer.getFeatures(
             f'"fieldwork_id" = \'{self.fieldwork_id}\' and "parent_point_id" is null and ({cp_code_clause})',
         )]  # type: ignore []
 
-        n_controls = len(fw_controls_needing_matches)
+        with progress_dialog("Finding control point matches...") as set_progress:
+            n_controls = len(fw_controls_needing_matches)
 
-        with layer_database_connection(self.layers.fieldwork_layer) as db, progress_dialog("Finding control point matches...") as set_progress:
+            src_crs = self.layers.fieldrunshot_layer.crs()
             # add widget for each fieldworkshot control
             for index, fw_shot in enumerate(fw_controls_needing_matches):
                 set_progress(index * 100 // n_controls)
+                projected_crs = QgsCoordinateReferenceSystem("EPSG:3857")  # Web Mercator so we can use meters
+                point = fw_shot.geometry()
+                transform_to_m = QgsCoordinateTransform(src_crs, projected_crs, qgsproj.transformContext())
+                point.transform(transform_to_m)
+
+                buffer_geom = point.buffer(5, 10)  # 5 meters
+                transform_back_to_crs = QgsCoordinateTransform(projected_crs, src_crs, qgsproj.transformContext())
+                buffer_geom.transform(transform_back_to_crs)
+
+                suggestions = []
+
                 # find nearby suggestions
-                point = fw_shot.geometry().asPoint()
-                distance_threshold = 5
-                # Use direct SQL query to get ids rather than qgis expression because it is much faster
-                # Construct the SQL expression using ST_DWithin
-                query = QSqlQuery(db)
-                sql = f"""
-                SELECT id
-                    FROM "public"."sites_fieldrunshot"
-                    WHERE
-                        -- within 5 meters of the fieldworkshot geometry
-                        -- convert geometry to ::geography so that the ST_DWithin is in meters, not degrees
-                        ST_DWithin(geom::geography, ST_GeomFromText('{point.asWkt()}', 4326)::geography, {distance_threshold})
-                        -- fieldrunshot is a control
-                        AND type like 'Control'
-                """  # noqa: S608
-                query.prepare(sql)
-                query.setForwardOnly(True)
-
-                feature_ids = []
-                if query.exec(sql):
-                    # Fetch the results
-                    while query.next():
-                        feature_id = query.value(0)  # ID
-                        feature_ids.append(feature_id)
-                else:
-                    QgsMessageLog.logMessage("No exec", level=Qgis.MessageLevel.Critical)
-                    QgsMessageLog.logMessage(f"{db.lastError().text()}", level=Qgis.MessageLevel.Critical)
-
-                # turn list of ids into list of qgis features
-                ids_str = ", ".join([f"'{i}'" for i in feature_ids])
-                expression = f'"id" in ({ids_str})'
-                suggestions = [*self.layers.fieldrunshot_layer.getFeatures(expression)]  # type: ignore []
+                with timed("find suggestions"):
+                    suggestions = [*self.layers.fieldrunshot_layer.getFeatures(
+                        QgsFeatureRequest().setFilterExpression("type like 'Control'").setFilterRect(buffer_geom.boundingBox()),
+                    )]  # type: ignore
 
                 # add widget for fieldworkshot matching
                 match_control_item = MatchControlItem(self.layers, fw_shot, suggestions, allow_create_new=allow_create_new)
@@ -176,8 +173,8 @@ class FieldRunMatchStage:
 
         for fieldwork_shot, control_match_result in dialog.results:
             if control_match_result.matched_fieldrunshot:
-                self.assign_fr_shot(fieldwork_shot, control_match_result.matched_fieldrunshot.attribute("id"))
+                self.assign_fr_shot(fieldwork_shot, control_match_result.matched_fieldrunshot["id"])
             elif control_match_result.new_fieldrunshot_name:
                 # create new point to match shot first
                 matched_fieldrunshot = self.create_fieldrun_control_shot(name=control_match_result.new_fieldrunshot_name, based_on_fieldwork_shot=fieldwork_shot)
-                self.assign_fr_shot(fieldwork_shot, matched_fieldrunshot.attribute("id"))
+                self.assign_fr_shot(fieldwork_shot, matched_fieldrunshot["id"])

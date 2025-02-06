@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from qgis.core import QgsFeature, QgsMessageLog
+from qgis.core import QgsFeature, QgsMessageLog, QgsSettings
 
-from fieldworkimport.helpers import not_NULL
+from fieldworkimport.helpers import assert_true, nullish, settings_key
 from fieldworkimport.ui.coordinate_shift_dialog import CoordinateShiftDialog, CoordinateShiftDialogResult
 
 if TYPE_CHECKING:
@@ -38,50 +38,43 @@ class CoordinateShiftStage:
         QgsMessageLog.logMessage(
             "CoordinateShiftStage.run started.",
         )
-        cp_code_clause = ", ".join([f"'{code}'" for code in self.plugin_input.control_point_codes])
+        s = QgsSettings()
+        control_point_codes = s.value(settings_key("control_point_codes")).split(",")
+        cp_code_clause = ", ".join([f"'{code}'" for code in control_point_codes])
 
         hpn_shift = self.calculate_hpn_shift()
         dialog = CoordinateShiftDialog(hpn_shift=hpn_shift)
 
         points: list[QgsFeature] = [*self.layers.fieldworkshot_layer.getFeatures(
             f"""
-            fieldwork_id = '{self.fieldwork.attribute('id')}' AND
+            fieldwork_id = '{self.fieldwork['id']}' AND
             code in ({cp_code_clause}) AND
             matching_fieldrun_shot_id is not null
             """,
         )]  # type: ignore []
 
         for fieldworkshot in points:
-            fieldrunshot = next(self.layers.fieldrunshot_layer.getFeatures(f"id = '{fieldworkshot.attribute('matching_fieldrun_shot_id')}'"))  # noqa: E501
-            controlpointdata = next(self.layers.controlpointdata_layer.getFeatures(f"fieldrun_shot_id = '{fieldrunshot.attribute('id')}'"), None)  # noqa: E501
+            fieldrunshot = next(self.layers.fieldrunshot_layer.getFeatures(f"id = '{fieldworkshot['matching_fieldrun_shot_id']}'"))  # noqa: E501
+            controlpointdata = next(self.layers.controlpointdata_layer.getFeatures(f"fieldrun_shot_id = '{fieldrunshot['id']}'"), None)  # noqa: E501
             if not controlpointdata:
-                QgsMessageLog.logMessage(f"Matched fieldrunshot has no controlpoint data. ({fieldrunshot.attribute('id')=})")
+                QgsMessageLog.logMessage(f"Matched fieldrunshot has no controlpoint data. ({fieldrunshot['id']=})")
                 continue
 
-            primary_coord_id = controlpointdata.attribute("primary_coord_id")
-            # no primary coord, skip this control (we can't use it for a shift)
-            if not not_NULL(primary_coord_id):
+            published_easting = controlpointdata["easting"]
+            published_northing = controlpointdata["northing"]
+            published_elevation = controlpointdata["elevation"]
+
+            # check if easting an northing is set, and if not, it's new and we can't use it for a shift
+            if nullish(published_easting) or nullish(published_northing):
                 continue
-            primary_coord = next(self.layers.controlpointcoordinate_layer.getFeatures(f"id = {primary_coord_id}"))
 
-            primary_elevation_id = controlpointdata.attribute("primary_elevation_id")
-            primary_elevation = None
-            # primary elevation not required, so it may be NULL.
-            if not_NULL(primary_elevation_id):
-                primary_elevation = next(self.layers.controlpointelevation_layer.getFeatures(f"id = {primary_elevation_id}"))  # noqa: E501
-
-            published_easting = primary_coord.attribute("east")
-            published_northing = primary_coord.attribute("north")
-            published_elevation = None
-            if primary_elevation:
-                published_elevation = primary_elevation.attribute("elev")
-            measured_easting = fieldworkshot.attribute("easting")
-            measured_northing = fieldworkshot.attribute("northing")
-            measured_elevation = fieldworkshot.attribute("elevation")
+            measured_easting = fieldworkshot["easting"]
+            measured_northing = fieldworkshot["northing"]
+            measured_elevation = fieldworkshot["elevation"]
             shift = (
                 published_easting - measured_easting,
                 published_northing - measured_northing,
-                (published_elevation - measured_elevation) if published_elevation else None,
+                (published_elevation - measured_elevation) if not nullish(published_elevation) else None,
             )
 
             dialog.add_shift_row(
@@ -103,10 +96,10 @@ class CoordinateShiftStage:
     def _apply_shift_to_fieldwork(self, result: CoordinateShiftDialogResult, fieldwork: QgsFeature) -> None:
         """Apply shift from dialog to fieldwork."""
         shift_type, shift, selected_fieldrunshots = result
-        ids = [shot.attribute("id") for shot in (selected_fieldrunshots or [])]
+        ids = [shot["id"] for shot in (selected_fieldrunshots or [])]
         ids_str = ",".join(ids)
 
-        fieldwork = next(self.layers.fieldwork_layer.getFeatures(f"\"id\"='{fieldwork.attribute("id")}'"))
+        fieldwork = next(self.layers.fieldwork_layer.getFeatures(f"\"id\"='{fieldwork["id"]}'"))
         fieldwork.setAttribute("shift_type", shift_type)
         fieldwork.setAttribute("shift_control_ids", ids_str)
         if shift:
@@ -114,8 +107,7 @@ class CoordinateShiftStage:
             fieldwork.setAttribute("northing_shift", shift[1])
             fieldwork.setAttribute("elevation_shift", shift[2])
 
-        self.layers.fieldwork_layer.updateFeature(fieldwork)
-        self.layers.fieldwork_layer.commitChanges()
+        assert_true(self.layers.fieldwork_layer.updateFeature(fieldwork), "Failed to update fieldwork with shift.")
 
     def _apply_shift_to_fieldworkshot(self, result: CoordinateShiftDialogResult, fieldworkshot: QgsFeature) -> None:
         """Apply shift from dialog to fieldwork point."""
@@ -133,7 +125,7 @@ class CoordinateShiftStage:
                 fieldworkshot[northing_idx] += shift[1]
             if fieldworkshot[elevation_idx]:
                 fieldworkshot[elevation_idx] += shift[2]
-            self.layers.fieldworkshot_layer.updateFeature(fieldworkshot)
+            assert_true(self.layers.fieldworkshot_layer.updateFeature(fieldworkshot), "Failed to update fieldwork shot with shift.")
 
     def apply_shift(self, result: CoordinateShiftDialogResult) -> None:
         """Apply shift from dialog."""
@@ -145,7 +137,7 @@ class CoordinateShiftStage:
             points: list[QgsFeature] = [
                 *self.layers.fieldworkshot_layer.getFeatures(
                     f"""
-                    "fieldwork_id" = '{self.fieldwork.attribute('id')}'
+                    "fieldwork_id" = '{self.fieldwork['id']}'
                     """,
                 ),  # type: ignore []
             ]
@@ -154,19 +146,19 @@ class CoordinateShiftStage:
                 self._apply_shift_to_fieldworkshot(result, point)
 
     def calculate_hpn_shift(self) -> tuple[float, float, float] | None:  # noqa: D102
-        SUM_easting = self.fieldwork.attribute("SUM_easting")  # noqa: N806
-        SUM_northing = self.fieldwork.attribute("SUM_northing")  # noqa: N806
-        SUM_elevation = self.fieldwork.attribute("SUM_elevation")  # noqa: N806
-        SUM_geoid_seperation = self.fieldwork.attribute("SUM_geoid_seperation")  # noqa: N806
-        REF_easting = self.fieldwork.attribute("REF_easting")  # noqa: N806
-        REF_northing = self.fieldwork.attribute("REF_northing")  # noqa: N806
-        REF_elevation = self.fieldwork.attribute("REF_elevation")  # noqa: N806
-        LOC_grid_easting = self.fieldwork.attribute("LOC_grid_easting")  # noqa: N806
-        LOC_grid_northing = self.fieldwork.attribute("LOC_grid_northing")  # noqa: N806
-        LOC_grid_elevation = self.fieldwork.attribute("LOC_grid_elevation")  # noqa: N806
-        LOC_measured_easting = self.fieldwork.attribute("LOC_measured_easting")  # noqa: N806
-        LOC_measured_northing = self.fieldwork.attribute("LOC_measured_northing")  # noqa: N806
-        LOC_measured_elevation = self.fieldwork.attribute("LOC_measured_elevation")  # noqa: N806
+        SUM_easting = self.fieldwork["SUM_easting"]  # noqa: N806
+        SUM_northing = self.fieldwork["SUM_northing"]  # noqa: N806
+        SUM_elevation = self.fieldwork["SUM_elevation"]  # noqa: N806
+        SUM_geoid_seperation = self.fieldwork["SUM_geoid_seperation"]  # noqa: N806
+        REF_easting = self.fieldwork["REF_easting"]  # noqa: N806
+        REF_northing = self.fieldwork["REF_northing"]  # noqa: N806
+        REF_elevation = self.fieldwork["REF_elevation"]  # noqa: N806
+        LOC_grid_easting = self.fieldwork["LOC_grid_easting"]  # noqa: N806
+        LOC_grid_northing = self.fieldwork["LOC_grid_northing"]  # noqa: N806
+        LOC_grid_elevation = self.fieldwork["LOC_grid_elevation"]  # noqa: N806
+        LOC_measured_easting = self.fieldwork["LOC_measured_easting"]  # noqa: N806
+        LOC_measured_northing = self.fieldwork["LOC_measured_northing"]  # noqa: N806
+        LOC_measured_elevation = self.fieldwork["LOC_measured_elevation"]  # noqa: N806
 
         if not all(
             var for var in [

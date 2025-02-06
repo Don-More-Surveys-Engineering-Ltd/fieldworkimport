@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pprint
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,10 +14,12 @@ from qgis.utils import iface as _iface
 
 from fieldworkimport.controlpublish.publish_controls_dialog import PublishControlsDialog
 from fieldworkimport.fwimport.import_process import FieldworkImportProcess
-from fieldworkimport.helpers import BASE_DIR, progress_dialog, timed
+from fieldworkimport.helpers import BASE_DIR, assert_true, progress_dialog, settings_key, timed
 from fieldworkimport.reportgen.report_process import create_report, get_report_variables
+from fieldworkimport.samepointshots.findsamepointshots_process import FindSamePointShots
 from fieldworkimport.ui.generate_report_dialog import GenerateReportDialog
 from fieldworkimport.ui.import_finished_dialog import ImportFinishedDialog
+from fieldworkimport.ui.validation_settings_dialog import ValidationSettingsDialog
 
 iface: QgisInterface = _iface  # type: ignore
 
@@ -28,13 +31,6 @@ from fieldworkimport.ui.import_dialog import ImportFieldworkDialog
 class PluginInput:
     """Holds validation settings and import input."""
 
-    vrms_tolerance: float
-    hrms_tolerance: float
-    same_point_tolerance: float
-    valid_codes: list[str]
-    valid_special_chars: list[str]
-    parameterized_special_chars: list[str]
-    control_point_codes: list[str]
     crdb_path: str
     rw5_path: str
     sum_path: str | None
@@ -127,6 +123,13 @@ class Plugin:
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
         self.setup_settings()
         self.add_action(
+            "",
+            text="Change Settings",
+            callback=self.start_validation_settings,
+            parent=iface.mainWindow(),
+            add_to_toolbar=False,
+        )
+        self.add_action(
             str(BASE_DIR / "resources" / "icons" / "noun-geodesy-7254004.svg"),
             text="Import Fieldwork",
             callback=self.start_import,
@@ -147,6 +150,13 @@ class Plugin:
             parent=iface.mainWindow(),
             add_to_toolbar=False,
         )
+        self.add_action(
+            "",
+            text="Find Same-point Shots",
+            callback=self.start_find_same_point_shots,
+            parent=iface.mainWindow(),
+            add_to_toolbar=False,
+        )
 
     def onClosePlugin(self) -> None:  # noqa: N802
         """Cleanup necessary items here when plugin dockwidget is closed."""
@@ -158,10 +168,38 @@ class Plugin:
             iface.removeToolBarIcon(action)
 
     def setup_settings(self):
-        settings = QgsSettings()
-        key = "dmse/importfieldwork/validation_settings_file"
-        if not settings.contains(key) or not settings.value(key) or not Path(settings.value(key)).exists():
-            settings.setValue(key, BASE_DIR / "resources" / "validation_settings.json")
+        s = QgsSettings()
+
+        validation_file_path = BASE_DIR / "resources" / "validation_settings.json"
+        if not validation_file_path:
+            msg = "QGIS settings is missing validation settings file path."
+            raise ValueError(msg)
+
+        validation_settings: dict = json.loads(Path(validation_file_path).read_text(encoding="utf-8"))
+        key = settings_key("hrms_tolerance")
+        if not s.contains(key) or not s.value(key):
+            s.setValue(key, validation_settings.get("hrms_tolerance", 0))
+        key = settings_key("vrms_tolerance")
+        if not s.contains(key) or not s.value(key):
+            s.setValue(key, validation_settings.get("vrms_tolerance", 0))
+        key = settings_key("same_point_tolerance")
+        if not s.contains(key) or not s.value(key):
+            s.setValue(key, validation_settings.get("same_point_tolerance", 0))
+        key = settings_key("valid_codes")
+        if not s.contains(key) or not s.value(key):
+            s.setValue(key, validation_settings.get("valid_codes", 0))
+        key = settings_key("valid_special_chars")
+        if not s.contains(key) or not s.value(key):
+            s.setValue(key, validation_settings.get("valid_special_chars", 0))
+        key = settings_key("parameterized_special_chars")
+        if not s.contains(key) or not s.value(key):
+            s.setValue(key, validation_settings.get("parameterized_special_chars", 0))
+        key = settings_key("control_point_codes")
+        if not s.contains(key) or not s.value(key):
+            s.setValue(key, validation_settings.get("control_point_codes", 0))
+        key = settings_key("debug_mode")
+        if not s.contains(key):
+            s.setValue(key, False)  # noqa: FBT003
 
     def _setup_import_dialog(self) -> ImportFieldworkDialog:
         dialog = ImportFieldworkDialog()
@@ -179,43 +217,54 @@ class Plugin:
             ref_path=self.import_dialog.ref_file_input.filePath(),
             loc_path=self.import_dialog.loc_file_input.filePath(),
             fieldrun_feature=self.import_dialog.fieldrun_input.feature(),
-            vrms_tolerance=self.import_dialog.vrms_tolerance_input.value(),
-            hrms_tolerance=self.import_dialog.hrms_tolerance_input.value(),
-            same_point_tolerance=self.import_dialog.same_point_tolerance_input.value(),
-            valid_codes=self.import_dialog.valid_codes_input.toPlainText().split(","),
-            valid_special_chars=self.import_dialog.valid_special_chars_input.text().split(","),
-            parameterized_special_chars=self.import_dialog.parameterized_special_chars_input.text().split(","),
-            control_point_codes=self.import_dialog.control_point_codes_input.text().split(","),
         )
 
         fwimport = FieldworkImportProcess(
             self.plugin_input,
         )
 
+        # run fieldwork import process
         try:
             fwimport.run()
         except AbortError as e:
             iface.messageBar().pushMessage("Import Aborted", e.args[0], level=Qgis.MessageLevel.Critical)  # type: ignore
             return
 
+        # show import finished dialog
         import_finished_dialog = ImportFinishedDialog()
         return_code = import_finished_dialog.exec_()
 
+        # rollback if requested
         if return_code == ImportFinishedDialog.Rejected:
             fwimport.rollback()
             return
 
+        # commit changes
         with progress_dialog("Saving Changes...", indeterminate=True):
-            fwimport.layers.fieldwork_layer.commitChanges()
-            fwimport.layers.fieldworkshot_layer.commitChanges()
-            fwimport.layers.fieldrunshot_layer.commitChanges()
-            fwimport.layers.controlpointdata_layer.commitChanges()
+            fail_msg = "Failed to commit {}."
+            assert_true(fwimport.layers.fieldwork_layer.commitChanges(), fail_msg.format("fieldwork_layer"))
+            assert_true(fwimport.layers.fieldworkshot_layer.commitChanges(), fail_msg.format("fieldworkshot_layer"))
+            assert_true(fwimport.layers.fieldrunshot_layer.commitChanges(), fail_msg.format("fieldrunshot_layer"))
+            assert_true(fwimport.layers.controlpointdata_layer.commitChanges(), fail_msg.format("controlpointdata_layer"))
 
+        # # integrate with other fieldwork by finding same point shots
+        # start by selecting all fieldwork shots
+        fwimport.layers.fieldworkshot_layer.selectByExpression(f'"fieldwork_id" = \'{fwimport.fieldwork_feature['id']}\'')
+        # then select all points in bbox of fieldwork shots to get shots from other fieldwork
+        bbox = fwimport.layers.fieldworkshot_layer.boundingBoxOfSelected()
+        fwimport.layers.fieldworkshot_layer.selectByRect(bbox)
+        # then run find_same_point_shots
+        self.start_find_same_point_shots()
+
+        # refresh fieldwork feature to get populated one with a fid
+        refreshed_fieldwork = next(fwimport.layers.fieldwork_layer.getFeatures(f"id = '{fwimport.fieldwork_feature['id']}'"))
+        # publish controls if requested
         if import_finished_dialog.next_publish_controls_checkbox.isChecked():
             with timed("start_publish_controls"):
-                self.start_publish_controls(fwimport.fieldwork_feature)
+                self.start_publish_controls(default_fieldwork=refreshed_fieldwork)
+        # create report if requested
         if import_finished_dialog.next_create_report_checkbox.isChecked():
-            self.start_generate_report()
+            self.start_generate_report(default_fieldwork=refreshed_fieldwork)
 
     def start_import(self) -> None:
         """Run method that performs all the real work."""
@@ -229,17 +278,36 @@ class Plugin:
         dialog.exec_()
 
     def start_generate_report(self, *args, default_fieldwork: QgsFeature | None = None):
-        dialog = GenerateReportDialog()
+        default_save_path = None
+        if self.plugin_input and self.plugin_input.crdb_path:
+            default_save_path = str(Path(self.plugin_input.crdb_path).parent)
+        dialog = GenerateReportDialog(default_fieldwork, default_save_path)
         return_code = dialog.exec_()
         if return_code == dialog.Rejected:
             return
         fieldwork_feature = dialog.fieldwork_input.feature()
         job_number = dialog.job_number_input.text()
         client_name = dialog.client_name_input.text()
-        with Path(r"C:\Users\jlong\Downloads\out.txt").open("w") as fptr, progress_dialog("report vars", indeterminate=True):
-            vars = get_report_variables(fieldwork_feature, None, job_number, client_name)
-            fptr.write(pprint.pformat(vars))
+        output_folder_path = Path(dialog.output_folder_input.filePath())
 
-        with Path(r"C:\Users\jlong\Downloads\out.html").open("w") as fptr, progress_dialog("report html", indeterminate=True):
-            html = create_report(vars)
+        s = QgsSettings()
+        debug_mode: bool = s.value(settings_key("debug_mode"), False, bool)
+
+        with progress_dialog("Generating Report...", indeterminate=True):
+            report_vars = get_report_variables(fieldwork_feature, self.plugin_input, job_number, client_name)
+            if debug_mode:
+                with (output_folder_path / "report_vars.txt").open("w") as fptr:
+                    fptr.write(pprint.pformat(report_vars))
+
+        with (output_folder_path / "Fieldwork Report.html").open("w") as fptr:
+            html = create_report(report_vars)
             fptr.write(html)
+
+    def start_find_same_point_shots(self):
+        with timed("class setup"):
+            shot_merge = FindSamePointShots()
+        shot_merge.run()
+
+    def start_validation_settings(self):
+        dialog = ValidationSettingsDialog()
+        dialog.exec()

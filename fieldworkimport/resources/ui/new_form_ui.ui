@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>772</width>
-    <height>501</height>
+    <height>235</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -18,201 +18,99 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout_2">
    <item>
-    <widget class="QTabWidget" name="tabWidget">
-     <property name="tabShape">
-      <enum>QTabWidget::Rounded</enum>
+    <widget class="QGroupBox" name="groupBox">
+     <property name="title">
+      <string>Fieldwork Setup</string>
      </property>
-     <property name="currentIndex">
-      <number>0</number>
-     </property>
-     <widget class="QWidget" name="tab">
-      <attribute name="title">
-       <string>Fieldwork Files</string>
-      </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout">
-       <item alignment="Qt::AlignTop">
-        <widget class="QWidget" name="widget" native="true">
-         <layout class="QFormLayout" name="formLayout_2">
-          <item row="1" column="0">
-           <widget class="QLabel" name="label_8">
-            <property name="text">
-             <string>CRDB File*</string>
-            </property>
-           </widget>
-          </item>
-          <item row="1" column="1">
-           <widget class="QgsFileWidget" name="crdb_file_input">
-            <property name="filter">
-             <string>CRDB file (*.crdb)</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="0">
-           <widget class="QLabel" name="label_9">
-            <property name="text">
-             <string>RW5 File*</string>
-            </property>
-           </widget>
-          </item>
-          <item row="2" column="1">
-           <widget class="QgsFileWidget" name="rw5_file_input">
-            <property name="filter">
-             <string>RW5 file (*.rw5)</string>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="0">
-           <widget class="QLabel" name="label_10">
-            <property name="text">
-             <string>SUM File</string>
-            </property>
-           </widget>
-          </item>
-          <item row="3" column="1">
-           <widget class="QgsFileWidget" name="sum_file_input">
-            <property name="filter">
-             <string>SUM file (*.sum)</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="0">
-           <widget class="QLabel" name="label_11">
-            <property name="text">
-             <string>REF File</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="1">
-           <widget class="QgsFileWidget" name="ref_file_input">
-            <property name="filter">
-             <string>REF file (*.ref)</string>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="0">
-           <widget class="QLabel" name="label_12">
-            <property name="text">
-             <string>LOC File</string>
-            </property>
-           </widget>
-          </item>
-          <item row="5" column="1">
-           <widget class="QgsFileWidget" name="loc_file_input">
-            <property name="filter">
-             <string>LOC file (*.loc)</string>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="0">
-           <widget class="QLabel" name="label_7">
-            <property name="text">
-             <string>Fieldrun</string>
-            </property>
-           </widget>
-          </item>
-          <item row="6" column="1">
-           <widget class="QgsFeaturePickerWidget" name="fieldrun_input">
-            <property name="allowNull">
-             <bool>true</bool>
-            </property>
-            <property name="showBrowserButtons">
-             <bool>false</bool>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </widget>
-       </item>
-      </layout>
-     </widget>
-     <widget class="QWidget" name="tab_2">
-      <attribute name="title">
-       <string>Validation Settings</string>
-      </attribute>
-      <layout class="QVBoxLayout" name="verticalLayout_3">
-       <item>
-        <layout class="QFormLayout" name="formLayout">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label">
-           <property name="text">
-            <string>HRMS Tolerance</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QDoubleSpinBox" name="hrms_tolerance_input"/>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_2">
-           <property name="text">
-            <string>VRMS Tolerance</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QDoubleSpinBox" name="vrms_tolerance_input"/>
-         </item>
-         <item row="2" column="0">
-          <widget class="QLabel" name="label_3">
-           <property name="text">
-            <string>Same Point Tolerance</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="1">
-          <widget class="QDoubleSpinBox" name="same_point_tolerance_input"/>
-         </item>
-         <item row="3" column="0">
-          <widget class="QLabel" name="label_4">
-           <property name="text">
-            <string>Valid Codes</string>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="1">
-          <widget class="QPlainTextEdit" name="valid_codes_input">
-           <property name="maximumSize">
-            <size>
-             <width>16777215</width>
-             <height>70</height>
-            </size>
-           </property>
-          </widget>
-         </item>
-         <item row="4" column="0">
-          <widget class="QLabel" name="label_5">
-           <property name="text">
-            <string>Valid Special Characters</string>
-           </property>
-          </widget>
-         </item>
-         <item row="4" column="1">
-          <widget class="QLineEdit" name="valid_special_chars_input"/>
-         </item>
-         <item row="5" column="0">
-          <widget class="QLabel" name="label_6">
-           <property name="text">
-            <string>Parameterized Special Characters</string>
-           </property>
-          </widget>
-         </item>
-         <item row="5" column="1">
-          <widget class="QLineEdit" name="parameterized_special_chars_input"/>
-         </item>
-         <item row="6" column="0">
-          <widget class="QLabel" name="label_13">
-           <property name="text">
-            <string>Control Point Codes</string>
-           </property>
-          </widget>
-         </item>
-         <item row="6" column="1">
-          <widget class="QLineEdit" name="control_point_codes_input"/>
-         </item>
-        </layout>
-       </item>
-      </layout>
-     </widget>
+     <layout class="QFormLayout" name="formLayout_5">
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_25">
+        <property name="text">
+         <string>CRDB File*</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QgsFileWidget" name="crdb_file_input">
+        <property name="filter">
+         <string>CRDB file (*.crdb)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_26">
+        <property name="text">
+         <string>RW5 File*</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QgsFileWidget" name="rw5_file_input">
+        <property name="filter">
+         <string>RW5 file (*.rw5)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="label_27">
+        <property name="text">
+         <string>SUM File</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QgsFileWidget" name="sum_file_input">
+        <property name="filter">
+         <string>SUM file (*.sum)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="0">
+       <widget class="QLabel" name="label_28">
+        <property name="text">
+         <string>REF File</string>
+        </property>
+       </widget>
+      </item>
+      <item row="4" column="1">
+       <widget class="QgsFileWidget" name="ref_file_input">
+        <property name="filter">
+         <string>REF file (*.ref)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="0">
+       <widget class="QLabel" name="label_29">
+        <property name="text">
+         <string>LOC File</string>
+        </property>
+       </widget>
+      </item>
+      <item row="5" column="1">
+       <widget class="QgsFileWidget" name="loc_file_input">
+        <property name="filter">
+         <string>LOC file (*.loc)</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="0">
+       <widget class="QLabel" name="label_30">
+        <property name="text">
+         <string>Fieldrun</string>
+        </property>
+       </widget>
+      </item>
+      <item row="6" column="1">
+       <widget class="QgsFeaturePickerWidget" name="fieldrun_input">
+        <property name="allowNull">
+         <bool>true</bool>
+        </property>
+        <property name="showBrowserButtons">
+         <bool>false</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
     </widget>
    </item>
    <item>

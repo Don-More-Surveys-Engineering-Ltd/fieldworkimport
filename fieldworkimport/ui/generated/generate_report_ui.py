@@ -13,7 +13,7 @@ from PyQt5 import QtCore, QtWidgets
 class Ui_GenerateReportDialog:
     def setupUi(self, GenerateReportDialog):
         GenerateReportDialog.setObjectName("GenerateReportDialog")
-        GenerateReportDialog.resize(400, 118)
+        GenerateReportDialog.resize(400, 147)
         self.verticalLayout = QtWidgets.QVBoxLayout(GenerateReportDialog)
         self.verticalLayout.setObjectName("verticalLayout")
         self.formLayout = QtWidgets.QFormLayout()
@@ -36,6 +36,14 @@ class Ui_GenerateReportDialog:
         self.label_3 = QtWidgets.QLabel(GenerateReportDialog)
         self.label_3.setObjectName("label_3")
         self.formLayout.setWidget(2, QtWidgets.QFormLayout.LabelRole, self.label_3)
+        self.label_4 = QtWidgets.QLabel(GenerateReportDialog)
+        self.label_4.setObjectName("label_4")
+        self.formLayout.setWidget(3, QtWidgets.QFormLayout.LabelRole, self.label_4)
+        self.output_folder_input = QgsFileWidget(GenerateReportDialog)
+        self.output_folder_input.setStorageMode(QgsFileWidget.GetDirectory)
+        self.output_folder_input.setOptions(QtWidgets.QFileDialog.DontConfirmOverwrite | QtWidgets.QFileDialog.ShowDirsOnly)
+        self.output_folder_input.setObjectName("output_folder_input")
+        self.formLayout.setWidget(3, QtWidgets.QFormLayout.FieldRole, self.output_folder_input)
         self.verticalLayout.addLayout(self.formLayout)
         self.buttonBox = QtWidgets.QDialogButtonBox(GenerateReportDialog)
         self.buttonBox.setOrientation(QtCore.Qt.Horizontal)
@@ -54,6 +62,8 @@ class Ui_GenerateReportDialog:
         self.label.setText(_translate("GenerateReportDialog", "Selected Fieldwork"))
         self.label_2.setText(_translate("GenerateReportDialog", "Job Number"))
         self.label_3.setText(_translate("GenerateReportDialog", "Client's Name"))
+        self.label_4.setText(_translate("GenerateReportDialog", "Save to folder"))
 
 
-from qgis.gui import QgsFeaturePickerWidget
+from qgis.gui import QgsFileWidget
+from qgsfeaturepickerwidget import QgsFeaturePickerWidget
