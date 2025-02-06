@@ -95,24 +95,19 @@ jobs:
         with:
           submodules: true
 
-      - name: Set up Python 3.9
-        uses: actions/setup-python@v1
-        with:
-          python-version: 3.9
+      # - name: Set up Python 3.9
+      #   uses: actions/setup-python@v1
+      #   with:
+      #     python-version: 3.9
 
-      #    Needed if the plugin is using Transifex, to have the lrelease command
-      #    - name: Install Qt lrelease
-      #      run: sudo apt-get update && sudo apt-get install qt5-default qttools5-dev-tools
+      # #    Needed if the plugin is using Transifex, to have the lrelease command
+      # #    - name: Install Qt lrelease
+      # #      run: sudo apt-get update && sudo apt-get install qt5-default qttools5-dev-tools
 
-      - name: Install qgis-plugin-ci
-        run: pip3 install qgis-plugin-ci
+      # - name: Install qgis-plugin-ci
+      #   run: pip3 install qgis-plugin-ci
 
-      # When Transifex is wanted: --transifex-token ${{ secrets.TRANSIFEX_TOKEN }}
-      - name: Deploy plugin
-        if: ${{ github.event.pull_request }}
-        run: qgis-plugin-ci release dev-pr --github-token ${{ secrets.GITHUB_TOKEN }} --disable-submodule-update
-
-        # When Transifex is wanted: --transifex-token ${{ secrets.TRANSIFEX_TOKEN }}
-      - name: Deploy plugin
-        if: ${{ github.event.after != github.event.before }}
-        run: qgis-plugin-ci release dev --github-token ${{ secrets.GITHUB_TOKEN }} --disable-submodule-update
+      #   # When Transifex is wanted: --transifex-token ${{ secrets.TRANSIFEX_TOKEN }}
+      # - name: Deploy plugin
+      #   if: ${{ github.event.after != github.event.before }}
+      #   run: qgis-plugin-ci release ${GITHUB_REF/refs\/tags\//} --github-token ${{ secrets.GITHUB_TOKEN }} --disable-submodule-update

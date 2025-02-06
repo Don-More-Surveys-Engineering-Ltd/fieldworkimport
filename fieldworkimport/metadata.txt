@@ -1,6 +1,6 @@
 [general]
 name=FieldworkImport
-description=
+description="Import DMSE style fieldwork into QGIS."
 about=
 version=0.1.0
 qgisMinimumVersion=3.16
@@ -8,9 +8,9 @@ author=
 email=
 changelog=
 tags=
-repository=https://github.com/my-organization/fieldworkimport
-tracker=https://github.com/my-organization/fieldworkimport/issues
-homepage=https://github.com/my-organization/fieldworkimport
+repository=https://github.com/j-osephlong/fieldworkimport
+tracker=https://github.com/j-osephlong/fieldworkimport/issues
+homepage=https://github.com/j-osephlong/fieldworkimport
 category=Plugins
 experimental=True
 deprecated=False
