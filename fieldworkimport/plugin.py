@@ -90,7 +90,7 @@ class Plugin:
         :param parent: Parent widget for the new action. Defaults None.
 
         :param whats_this: Optional text to show in the status bar when the
-            mouse pointer hovers over the action.
+            mouse pointer hovers over the action .
 
         :returns: The action that was created. Note that the action is also
             added to self.actions list.
