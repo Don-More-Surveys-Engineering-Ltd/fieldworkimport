@@ -1,11 +1,21 @@
 # FieldworkImport
-![tests](https://github.com/my-organization/fieldworkimport/workflows/Tests/badge.svg)
-[![codecov.io](https://codecov.io/github/my-organization/fieldworkimport/coverage.svg?branch=main)](https://codecov.io/github/my-organization/fieldworkimport?branch=main)
-![release](https://github.com/my-organization/fieldworkimport/workflows/Release/badge.svg)
-
 [![GPLv2 license](https://img.shields.io/badge/License-GPLv2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
+
+## Using in QGIS
+
+- Add the plugin repo `https://github.com/Don-More-Surveys-Engineering-Ltd/fieldworkimport/releases/latest/download/plugins.xml` in QGIS. 
+- Check **Show also Experimental Plugins**.
+- In the available plugins list, add the plugin "*Fieldwork Import*".  
+
+## Releasing
+
+- Push your commits to main.
+- Add a tag with `git tag v0.0.0`
+- Push your tag with `git push --tags`
+
+At this point the github workflow `release.yml` will create a release providing a `plugins.xml`. This is what makes the release as a plugin repo work.   
 
 ## Development
 

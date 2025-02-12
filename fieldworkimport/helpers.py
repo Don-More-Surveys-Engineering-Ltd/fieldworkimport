@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from pathlib import Path
-from time import gmtime, sleep, strftime
+from time import gmtime, strftime
 from timeit import default_timer as timer
 from typing import Any
 
@@ -65,7 +65,7 @@ def timed(name: str):
 
 
 @contextmanager
-def progress_dialog(text: str, *, indeterminate: bool = False):
+def progress_dialog(text: str):
     dialog = QProgressDialog()
     dialog.setWindowModality(Qt.WindowModal)
     dialog.setWindowTitle("Progress")
@@ -76,28 +76,20 @@ def progress_dialog(text: str, *, indeterminate: bool = False):
 
     start = timer()
 
-    qapp = QgsApplication.instance()
-    assert qapp
-
     def set_progress(p: int) -> None:
         t = timer() - start
         hms = strftime("%H:%M:%S", gmtime(t))
         bar.setFormat(f"{hms} - %p%")
         bar.setValue(p)
-        qapp.processEvents()
+        QgsApplication.processEvents()
 
-    if indeterminate:
-        bar.setRange(0, 0)
-        bar.setValue(0)
-    else:
-        bar.setMinimum(0)
-        bar.setMaximum(100)
-        bar.setTextVisible(True)
-        set_progress(0)
+    bar.setMinimum(0)
+    bar.setMaximum(100)
+    bar.setTextVisible(True)
+    set_progress(0)
 
     dialog.show()
-    sleep(0.5)
-    qapp.processEvents()
+    QgsApplication.processEvents()
 
     yield set_progress
 

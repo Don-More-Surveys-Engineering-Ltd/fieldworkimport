@@ -63,7 +63,7 @@
 	</style>
 </head>
 
-{% set LOC_FILE_USED = not nullish(fw["LOC_description"]) %}
+{% set LOC_FILE_USED = not nullish(fw["LOC_description"]) and fw["LOC_description"] != "" %}
 {% set SUM_FILE_USED = not nullish(fw["SUM_geoid_seperation"]) %}
 
 <body>
@@ -166,9 +166,9 @@
 					The shift was calculated as the difference between the following known control points
 					and their corresponding shots captured in this fieldwork:
 					<ul>
-					{% for i in coordinate_shift.shift_controls %}
+					{% for i in coordinate_shift_controls %}
 						<li>
-							{{ i.fr_shot.name }}
+							{{ i.name }}
 						</li>
 					{% endfor %}
 					</ul>
@@ -228,9 +228,9 @@
 						<tr>
 							<th scope="row">{{control.fr_shot.name}}</th>
 							<td>
-								{% set p_east = control.control_point_data.easting %}
-								{% set p_north = control.control_point_data.northing %}
-								{% set p_elev = control.control_point_data.elevation %}
+								{% set p_east = control.fr_shot.control_easting %}
+								{% set p_north = control.fr_shot.control_northing %}
+								{% set p_elev = control.fr_shot.control_elevation %}
 								{% set o_east = control.fw_shot.easting %}
 								{% set o_north = control.fw_shot.northing %}
 								{% set o_elev = control.fw_shot.elevation %}

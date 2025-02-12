@@ -29,7 +29,7 @@ class PublishControlItem(QWidget, Ui_PublishControlItem):
 
         self.fieldwork_shot = fieldwork_shot
         self.fieldrun_shot = next(self.fieldrunshot_layer.getFeatures(
-            QgsFeatureRequest(QgsExpression(f"id = '{self.fieldwork_shot['matching_fieldrun_shot_id']}'"))
+            QgsFeatureRequest(QgsExpression(f"matched_fieldwork_shot_id = '{self.fieldwork_shot['id']}'"))
             .setLimit(1),
         ))  # type: ignore
 

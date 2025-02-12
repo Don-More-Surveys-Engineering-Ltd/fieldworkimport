@@ -19,7 +19,6 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
     fieldwork_layer: QgsVectorLayer
     fieldworkshot_layer: QgsVectorLayer
     fieldrunshot_layer: QgsVectorLayer
-    controlpointdata_layer: QgsVectorLayer
 
     def __init__(
         self,
@@ -33,8 +32,6 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
         self.fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0]
         self.fieldworkshot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
         self.fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", no_filter=True, raise_exception=True)[0]
-        self.controlpointdata_layer = get_layers_by_table_name("public", "sites_controlpointdata", no_filter=True, raise_exception=True)[0]
-
         self.fieldwork_input.setLayer(self.fieldwork_layer)
         self.fieldwork_input.featureChanged.connect(self.selected_fieldwork_changed)
         if default_fieldwork:
@@ -69,14 +66,13 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
         cp_code_clause = ", ".join([f"'{code}'" for code in control_point_codes])
         if nullish(self.selected_fieldwork):
             return
-        assert self.selected_fieldwork is not None  # noqa: S101
+        assert not nullish(self.selected_fieldwork) and isinstance(self.selected_fieldwork, QgsFeature)  # noqa: S101
         self.reset_controls_list()
         fieldwork_id = self.selected_fieldwork["id"]
         with timed("findfind_elligble_controls __internal"):
             fieldworkshots: list[QgsFeature] = [*self.fieldworkshot_layer.getFeatures(
                 f"""
                 fieldwork_id = '{fieldwork_id}' AND
-                matching_fieldrun_shot_id is not null AND
                 is_processed = true AND
                 code in ({cp_code_clause})
                 """,
@@ -85,24 +81,15 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
             QgsMessageLog.logMessage(f"Fieldwork shots found: {len(fieldworkshots)}")
 
             for shot in fieldworkshots:
-                matching_fieldrun_shot = next(self.fieldrunshot_layer.getFeatures(
+                matched_fieldrun_shot = next(self.fieldrunshot_layer.getFeatures(
                     f"""
-                    id = '{shot['matching_fieldrun_shot_id']}' AND
-                    type like 'Control'
+                    matched_fieldwork_shot_id = '{shot['id']}' AND
+                    type like 'Control' AND
+                    (control_easting is null or control_northing is null)
                     """,
                 ), None)
-                if not matching_fieldrun_shot:
+                if not matched_fieldrun_shot:
                     QgsMessageLog.logMessage(f"shot {shot['name']} no fieldrunshot")
-                    continue
-
-                controlpointdata = next(self.controlpointdata_layer.getFeatures(
-                    f"""
-                    fieldrun_shot_id = '{matching_fieldrun_shot['id']}' AND
-                    (easting is null or northing is null)
-                    """,
-                ), None)
-                if not controlpointdata:
-                    QgsMessageLog.logMessage(f"shot {shot['name']} no controlpointdata")
                     continue
 
                 self.add_control(shot)
@@ -110,10 +97,8 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
     def publish_controls(self):
         self.fieldworkshot_layer.startEditing()
         self.fieldrunshot_layer.startEditing()
-        self.controlpointdata_layer.startEditing()
 
         frs_fields = self.fieldrunshot_layer.fields()
-        cpd_fields = self.controlpointdata_layer.fields()
 
         for item in self.scrollAreaWidgetContents.children():
             if not isinstance(item, PublishControlItem):
@@ -129,39 +114,21 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
             fieldrunshot = item.fieldrun_shot
             fieldrunshot[frs_fields.indexFromName("name")] = name
             fieldrunshot[frs_fields.indexFromName("description")] = description
-            assert_true(self.fieldrunshot_layer.updateFeature(fieldrunshot), "Failed to update fieldrun shot.")
-
-            controlpointdata = next(self.controlpointdata_layer.getFeatures(f"fieldrun_shot_id = '{fieldrunshot["id"]}'"), None)  # noqa: E501
-            if not controlpointdata:
-                msg = "No controlpoint data in publish_controls."
-                raise ValueError(msg)
             # update control point data to set published_by_fieldwork_id
             # lets us know that the control point coords were published by this fieldwork.
             if self.selected_fieldwork:
-                controlpointdata[cpd_fields.indexFromName("published_by_fieldwork_id")] = self.selected_fieldwork["id"]
+                fieldrunshot[frs_fields.indexFromName("control_published_by_fieldwork_id")] = self.selected_fieldwork["id"]
 
-            controlpointdata[cpd_fields.indexFromName("coordinate_system_id")] = coord_system["id"]
-            controlpointdata[cpd_fields.indexFromName("easting")] = fieldworkshot["easting"]
-            controlpointdata[cpd_fields.indexFromName("northing")] = fieldworkshot["northing"]
-            controlpointdata[cpd_fields.indexFromName("elevation_system_id")] = elevation_system["id"]
-            controlpointdata[cpd_fields.indexFromName("elevation")] = fieldworkshot["elevation"]
-            assert_true(self.controlpointdata_layer.updateFeature(controlpointdata), "Failed to update controlpoint data.")
+            fieldrunshot[frs_fields.indexFromName("control_coordinate_system_id")] = coord_system["id"]
+            fieldrunshot[frs_fields.indexFromName("control_easting")] = fieldworkshot["easting"]
+            fieldrunshot[frs_fields.indexFromName("control_northing")] = fieldworkshot["northing"]
+            fieldrunshot[frs_fields.indexFromName("control_elevation_system_id")] = elevation_system["id"]
+            fieldrunshot[frs_fields.indexFromName("control_elevation")] = fieldworkshot["elevation"]
+            assert_true(self.fieldrunshot_layer.updateFeature(fieldrunshot), "Failed to update fieldrun shot.")
 
         fail_msg = "Failed to commit %s."
         assert_true(self.fieldworkshot_layer.commitChanges(), fail_msg % "fieldworkshot")
         assert_true(self.fieldrunshot_layer.commitChanges(), fail_msg % "fieldrunshot")
-        assert_true(self.controlpointdata_layer.commitChanges(stopEditing=False), fail_msg % "controlpointdata")
-
-        try:
-            assert_true(self.controlpointdata_layer.commitChanges(), fail_msg % "controlpointdata (second commit)")
-        except:
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Critical)
-            msg.setText("Commit error...")
-            msg.setInformativeText("Part 2 of the coordinate publishing routine failed, and you may be left with invalid data.")  # noqa: E501
-            msg.setWindowTitle("Failed")
-            msg.exec()
-            raise
 
     def accept(self) -> None:
         if not self.is_valid():
@@ -173,13 +140,13 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
             msg.exec()
             return None
 
-        with progress_dialog("Publishing Controls...", indeterminate=True):
+        with progress_dialog("Publishing Controls...") as sp:
+            sp(50)
             try:
                 self.publish_controls()
             except:
                 # try to rollback if possible.
                 self.fieldworkshot_layer.rollBack()
-                self.controlpointdata_layer.rollBack()
                 self.fieldrunshot_layer.rollBack()
                 raise
 

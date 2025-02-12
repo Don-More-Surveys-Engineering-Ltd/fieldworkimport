@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 class FieldRunMatchStage:
     layers: "FieldworkImportLayers"
-    fw_matching_fieldrun_shot_id_index: int
     fieldwork_id: str
     fieldrun_id: Optional[int]  # noqa: FA100
     plugin_input: "PluginInput"
@@ -42,7 +41,6 @@ class FieldRunMatchStage:
         self.plugin_input = plugin_input
 
         fw_fields = self.layers.fieldworkshot_layer.fields()
-        self.fw_matching_fieldrun_shot_id_index = fw_fields.indexFromName("matching_fieldrun_shot_id")
 
     def run(self):
         """Start finding matches."""
@@ -68,24 +66,18 @@ class FieldRunMatchStage:
 
         assert_true(self.layers.fieldrunshot_layer.addFeature(new_fieldrunshot), "Failed to add new fieldrun shot.")
 
-        new_controlpointdata = QgsVectorLayerUtils.createFeature(self.layers.controlpointdata_layer)
-        cpd_fields = self.layers.controlpointdata_layer.fields()
-        new_controlpointdata[cpd_fields.indexFromName("fieldrun_shot_id")] = new_fieldrunshot["id"]
-
-        assert_true(self.layers.controlpointdata_layer.addFeature(new_controlpointdata), "Failed to add control point data.")
-
         return new_fieldrunshot
 
-    def assign_fr_shot(self, fw_shot: QgsFeature, fr_shot_id: str) -> None:
-        """Assign fieldrun show as match for fieldwork shot, and that shot's ancestors."""
-        fw_shot[self.fw_matching_fieldrun_shot_id_index] = fr_shot_id
-        assert_true(self.layers.fieldworkshot_layer.updateFeature(fw_shot), "Failed to assign fieldrun shot match to fieldwork shot.")
-
-        # recurse up ancestor tree.
+    def assign_fr_shot(self, fw_shot: QgsFeature, fr_shot: QgsFeature) -> None:
+        """Assign fieldrun show as match for fieldwork shot or its ancestor."""
         parent_point_id = fw_shot["parent_point_id"]
         if not nullish(parent_point_id):
             parent_point = next(self.layers.fieldworkshot_layer.getFeatures(f"id = '{parent_point_id}'"))
-            self.assign_fr_shot(parent_point, fr_shot_id)
+            # recurse up ancestor tree.
+            self.assign_fr_shot(parent_point, fr_shot)
+        else:
+            fr_shot["matched_fieldwork_shot_id"] = fw_shot["id"]
+            assert_true(self.layers.fieldrunshot_layer.updateFeature(fr_shot), "Failed to assign fieldwork shot match to fieldrun shot.")
 
     def match_on_name(self) -> None:
         """Iterate through fieldwork points, look for match in fieldrun points.
@@ -116,10 +108,9 @@ class FieldRunMatchStage:
             fw_shot_name = fw_shot["name"]
             if fw_shot_name in fr_name_feature_map:
                 fr_shot = fr_name_feature_map[fw_shot_name]
-                fr_shot_id = fr_shot["id"]
                 QgsMessageLog.logMessage(f"Matched {fw_shot['name']} to field run shot {fr_shot['name']} based on name.")
 
-                self.assign_fr_shot(fw_shot, fr_shot_id)
+                self.assign_fr_shot(fw_shot, fr_shot)
 
     def match_controls(self) -> None:
         """List all controls that need matches, with neasby (5m) suggestions for each point.
@@ -153,7 +144,7 @@ class FieldRunMatchStage:
                 transform_to_m = QgsCoordinateTransform(src_crs, projected_crs, qgsproj.transformContext())
                 point.transform(transform_to_m)
 
-                buffer_geom = point.buffer(5, 10)  # 5 meters
+                buffer_geom = point.buffer(10, 10)  # 5 meters
                 transform_back_to_crs = QgsCoordinateTransform(projected_crs, src_crs, qgsproj.transformContext())
                 buffer_geom.transform(transform_back_to_crs)
 
@@ -173,8 +164,9 @@ class FieldRunMatchStage:
 
         for fieldwork_shot, control_match_result in dialog.results:
             if control_match_result.matched_fieldrunshot:
-                self.assign_fr_shot(fieldwork_shot, control_match_result.matched_fieldrunshot["id"])
+                # match to selected fieldrun shot
+                self.assign_fr_shot(fieldwork_shot, control_match_result.matched_fieldrunshot)
             elif control_match_result.new_fieldrunshot_name:
-                # create new point to match shot first
+                # create new fieldrun shot control point, and then match to it
                 matched_fieldrunshot = self.create_fieldrun_control_shot(name=control_match_result.new_fieldrunshot_name, based_on_fieldwork_shot=fieldwork_shot)
-                self.assign_fr_shot(fieldwork_shot, matched_fieldrunshot["id"])
+                self.assign_fr_shot(fieldwork_shot, matched_fieldrunshot)

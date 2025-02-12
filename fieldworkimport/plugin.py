@@ -6,17 +6,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from PyQt5.QtWidgets import QAction, QWidget
-from qgis.core import Qgis, QgsFeature, QgsSettings, QgsVectorLayer
+from PyQt5.QtWidgets import QAction, QMessageBox, QWidget
+from qgis.core import Qgis, QgsFeature, QgsProject, QgsSettings, QgsVectorLayer
 from qgis.gui import QgisInterface
 from qgis.PyQt.QtGui import QIcon
 from qgis.utils import iface as _iface
 
 from fieldworkimport.controlpublish.publish_controls_dialog import PublishControlsDialog
 from fieldworkimport.fwimport.import_process import FieldworkImportProcess
-from fieldworkimport.helpers import BASE_DIR, assert_true, progress_dialog, settings_key, timed
+from fieldworkimport.helpers import (
+    BASE_DIR,
+    assert_true,
+    get_layers_by_table_name,
+    progress_dialog,
+    settings_key,
+    timed,
+)
 from fieldworkimport.reportgen.report_process import create_report, get_report_variables
 from fieldworkimport.samepointshots.findsamepointshots_process import FindSamePointShots
+from fieldworkimport.ui.delete_dialog import DeleteFieldworkDialog
 from fieldworkimport.ui.generate_report_dialog import GenerateReportDialog
 from fieldworkimport.ui.import_finished_dialog import ImportFinishedDialog
 from fieldworkimport.ui.validation_settings_dialog import ValidationSettingsDialog
@@ -157,6 +165,13 @@ class Plugin:
             parent=iface.mainWindow(),
             add_to_toolbar=False,
         )
+        self.add_action(
+            "",
+            text="Delete a fieldwork",
+            callback=self.start_delete_fieldwork,
+            parent=iface.mainWindow(),
+            add_to_toolbar=False,
+        )
 
     def onClosePlugin(self) -> None:  # noqa: N802
         """Cleanup necessary items here when plugin dockwidget is closed."""
@@ -240,12 +255,18 @@ class Plugin:
             return
 
         # commit changes
-        with progress_dialog("Saving Changes...", indeterminate=True):
+        with progress_dialog("Saving Changes...") as sp:
             fail_msg = "Failed to commit {}."
             assert_true(fwimport.layers.fieldwork_layer.commitChanges(), fail_msg.format("fieldwork_layer"))
+            sp(25)
             assert_true(fwimport.layers.fieldworkshot_layer.commitChanges(), fail_msg.format("fieldworkshot_layer"))
+            sp(75)
             assert_true(fwimport.layers.fieldrunshot_layer.commitChanges(), fail_msg.format("fieldrunshot_layer"))
-            assert_true(fwimport.layers.controlpointdata_layer.commitChanges(), fail_msg.format("controlpointdata_layer"))
+
+        # refresh all layers to show new points
+        canvas = iface.mapCanvas()
+        if canvas:
+            canvas.refreshAllLayers()
 
         # # integrate with other fieldwork by finding same point shots
         # start by selecting all fieldwork shots
@@ -268,13 +289,26 @@ class Plugin:
 
     def start_import(self) -> None:
         """Run method that performs all the real work."""
+        project = QgsProject.instance()
+        fieldwork_layer_present = len(get_layers_by_table_name("public", "sites_fieldwork", no_filter=True)) > 0
+        if project is None or not fieldwork_layer_present:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+            msg.setText("No project found.")
+            msg.setInformativeText("Please open a DMSE fieldwork project first.")
+            msg.setWindowTitle("No Project Found")
+            msg.exec()
+            return
+
         self.import_dialog = self._setup_import_dialog()
         self.import_dialog.show()
         self.import_dialog.accepted.connect(self._on_accept_new_form)
 
     def start_publish_controls(self, *args, default_fieldwork: QgsFeature | None = None):
-        with progress_dialog("Searching for new controls...", indeterminate=True):
+        with progress_dialog("Searching for new controls...") as sp:
+            sp(25)
             dialog = PublishControlsDialog(default_fieldwork)
+            sp(75)
         dialog.exec_()
 
     def start_generate_report(self, *args, default_fieldwork: QgsFeature | None = None):
@@ -293,15 +327,16 @@ class Plugin:
         s = QgsSettings()
         debug_mode: bool = s.value(settings_key("debug_mode"), False, bool)
 
-        with progress_dialog("Generating Report...", indeterminate=True):
+        with progress_dialog("Generating Report...") as sp:
             report_vars = get_report_variables(fieldwork_feature, self.plugin_input, job_number, client_name)
+            sp(25)
             if debug_mode:
                 with (output_folder_path / "report_vars.txt").open("w") as fptr:
                     fptr.write(pprint.pformat(report_vars))
-
-        with (output_folder_path / "Fieldwork Report.html").open("w") as fptr:
-            html = create_report(report_vars)
-            fptr.write(html)
+            sp(75)
+            with (output_folder_path / "Fieldwork Report.html").open("w") as fptr:
+                html = create_report(report_vars)
+                fptr.write(html)
 
     def start_find_same_point_shots(self):
         with timed("class setup"):
@@ -311,3 +346,41 @@ class Plugin:
     def start_validation_settings(self):
         dialog = ValidationSettingsDialog()
         dialog.exec()
+
+    def start_delete_fieldwork(self):
+        dialog = DeleteFieldworkDialog()
+        return_code = dialog.exec_()
+        if return_code == dialog.Rejected:
+            return
+
+        fieldwork = dialog.fieldwork_input.feature()
+
+        fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0]
+        fieldworkshot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
+        fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", no_filter=True, raise_exception=True)[0]
+        fieldwork_layer.startEditing()
+        fieldworkshot_layer.startEditing()
+        fieldrunshot_layer.startEditing()
+
+        shots: list[QgsFeature] = [*fieldworkshot_layer.getFeatures(f"\"fieldwork_id\" = '{fieldwork.attribute('id')}'")]  # type: ignore
+        for shot in shots:
+            matched_fieldrun_shot = next(fieldrunshot_layer.getFeatures(f"matched_fieldwork_shot_id = '{shot['id']}'"), None)
+            if matched_fieldrun_shot:
+                matched_fieldrun_shot["matched_fieldwork_shot_id"] = None
+                fieldrunshot_layer.updateFeature(matched_fieldrun_shot)
+
+        assert_true(fieldworkshot_layer.deleteFeatures([shot.id() for shot in shots]), "Failed to delete fieldworkshots.")
+        assert_true(fieldwork_layer.deleteFeature(fieldwork.id()), "Failed to delete fieldwork.")
+
+        assert_true(fieldrunshot_layer.commitChanges(), "Failed to commit fieldworkshot layer.")
+        assert_true(fieldworkshot_layer.commitChanges(), "Failed to commit fieldworkshot layer.")
+        assert_true(fieldwork_layer.commitChanges(), "Failed to commit fieldwork layer.")
+
+        # refresh all layers to show new points
+        canvas = iface.mapCanvas()
+        if canvas:
+            canvas.refreshAllLayers()
+
+        msg_bar = iface.messageBar()
+        assert msg_bar
+        msg_bar.pushMessage("Success", "Deleted fieldwork.", level=Qgis.MessageLevel.Success)

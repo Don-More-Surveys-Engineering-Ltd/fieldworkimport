@@ -18,7 +18,7 @@ from qgis.core import (
     QgsVectorLayerUtils,
 )
 from qgis.gui import QgisInterface
-from qgis.PyQt.QtWidgets import QDialog, QMessageBox
+from qgis.PyQt.QtWidgets import QMessageBox
 from qgis.utils import iface as _iface
 
 from fieldworkimport.exceptions import AbortError
@@ -57,10 +57,13 @@ def warn_against_duplicate_imports(fieldwork_layer: QgsVectorLayer, fieldwork_na
         msg = QMessageBox()
         msg.setIcon(QMessageBox.Warning)
         msg.setText("Possible duplicate import.")
+        msg.setStandardButtons(QMessageBox.Ok)
+        msg.addButton(QMessageBox.Cancel)
+        msg.setDefaultButton(QMessageBox.Cancel)
         msg.setInformativeText(f"Another fieldwork with the name '{fieldwork_name}' (found in RW5 file) has already been imported. Are you sure you want to continue?")
         msg.setWindowTitle("Duplictate import detected.")
         return_code = msg.exec()
-        if return_code == QDialog.Rejected:
+        if return_code == QMessageBox.Cancel:
             return True
     return False
 

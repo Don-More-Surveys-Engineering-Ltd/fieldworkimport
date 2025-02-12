@@ -37,7 +37,6 @@ class FieldworkImportLayers:
     fieldwork_layer: QgsVectorLayer
     fieldworkshot_layer: QgsVectorLayer
     fieldrunshot_layer: QgsVectorLayer
-    controlpointdata_layer: QgsVectorLayer
     coordsystem_layer: QgsVectorLayer
     elevationsystem_layer: QgsVectorLayer
 
@@ -55,7 +54,6 @@ class FieldworkImportProcess:
         fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", raise_exception=True, no_filter=True)[0]
         fieldworkshot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", raise_exception=True, no_filter=True, require_geom=True)[0]
         fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", raise_exception=True, no_filter=True, require_geom=True)[0]
-        controlpointdata_layer = get_layers_by_table_name("public", "sites_controlpointdata", raise_exception=True, no_filter=True)[0]
         coordsystem_layer = get_layers_by_table_name("public", "sites_coordsystem", raise_exception=True, no_filter=True)[0]
         eleavtionsystem_layer = get_layers_by_table_name("public", "sites_elevationsystem", raise_exception=True, no_filter=True)[0]
 
@@ -63,13 +61,11 @@ class FieldworkImportProcess:
             fieldwork_layer=fieldwork_layer,
             fieldworkshot_layer=fieldworkshot_layer,
             fieldrunshot_layer=fieldrunshot_layer,
-            controlpointdata_layer=controlpointdata_layer,
             coordsystem_layer=coordsystem_layer,
             elevationsystem_layer=eleavtionsystem_layer,
         )
 
     def rollback(self):
-        self.layers.controlpointdata_layer.rollBack()
         self.layers.fieldrunshot_layer.rollBack()
         self.layers.fieldworkshot_layer.rollBack()
         self.layers.fieldwork_layer.rollBack()
@@ -79,7 +75,6 @@ class FieldworkImportProcess:
             self.layers.fieldwork_layer.startEditing()
             self.layers.fieldworkshot_layer.startEditing()
             self.layers.fieldrunshot_layer.startEditing()
-            self.layers.controlpointdata_layer.startEditing()
 
             with timed("create_fieldwork"):
                 self.fieldwork_feature = create_fieldwork(

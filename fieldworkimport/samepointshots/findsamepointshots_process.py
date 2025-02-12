@@ -17,7 +17,7 @@ from qgis.utils import iface as _iface
 
 from fieldworkimport.common import get_average_point, parent_point_name
 from fieldworkimport.exceptions import AbortError
-from fieldworkimport.helpers import assert_true, nullish, progress_dialog, timed
+from fieldworkimport.helpers import assert_true, get_layers_by_table_name, nullish, progress_dialog, timed
 from fieldworkimport.ui.possible_same_point_shot_dialog import PossibleSamePointShotDialog
 from fieldworkimport.ui.recalculate_shot_dialog import RecalculateShotDialog
 
@@ -46,6 +46,7 @@ class FindSamePointShots:
     """
 
     layer: QgsVectorLayer
+    fieldrunshot_layer: QgsVectorLayer
     distance_threshold: float
     do_nothing_ids: set[int]
     """Ids of shots that we chose to do nothing with. We remember this so we don't spam user with same question."""
@@ -64,6 +65,7 @@ class FindSamePointShots:
 
         assert isinstance(layer, QgsVectorLayer)
         self.layer = layer
+        self.fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", require_geom=True, raise_exception=True, no_filter=True)[0]
         self.distance_threshold = distance_threshold
         self.do_nothing_ids = set()
 
@@ -148,9 +150,11 @@ class FindSamePointShots:
         child["parent_point_id"] = parent["id"]  # parent child
         # if the child has a fieldrun shot match and the parent doesn't,
         # propagate the match to the parent.
-        if not nullish(child["matching_fieldrun_shot_id"]) and nullish(parent["matching_fieldrun_shot_id"]):
-            parent["matching_fieldrun_shot_id"] = child["matching_fieldrun_shot_id"]
-            assert_true(self.layer.updateFeature(parent), "Failed to propagate matched fieldrun shot.")
+
+        child_matched_fr_shot = next(self.fieldrunshot_layer.getFeatures(f"matched_fieldwork_shot_id = '{child['id']}'"), None)
+        if child_matched_fr_shot:
+            child_matched_fr_shot["matched_fieldwork_shot_id"] = parent["id"]
+            assert_true(self.fieldrunshot_layer.updateFeature(child_matched_fr_shot), "Failed to propagate matched fieldrun shot.")
         assert_true(self.layer.updateFeature(child), "Failed to parent child to parent shot.")
 
     def __prompt_user_with_recalculate(self, point_1: QgsFeature, point_2: QgsFeature) -> None:
@@ -191,17 +195,21 @@ class FindSamePointShots:
         if idx is not None:
             avg_shot[idx] = None
 
-        # make sure the matched fieldrun shot of one of the two top same point shots are propagated.
-        if not nullish(point_1["matching_fieldrun_shot_id"]):
-            avg_shot["matching_fieldrun_shot_id"] = point_1["matching_fieldrun_shot_id"]
-        elif not nullish(point_2["matching_fieldrun_shot_id"]):
-            avg_shot["matching_fieldrun_shot_id"] = point_2["matching_fieldrun_shot_id"]
+        p1_matched_fr_shot = next(self.fieldrunshot_layer.getFeatures(f"matched_fieldwork_shot_id = '{point_1['id']}'"), None)
+        if p1_matched_fr_shot:
+            p1_matched_fr_shot["matched_fieldwork_shot_id"] = avg_shot["id"]
+            assert_true(self.fieldrunshot_layer.updateFeature(p1_matched_fr_shot), "Failed to update point 1's matched fieldrun shot.")
+        else:
+            p2_matched_fr_shot = next(self.fieldrunshot_layer.getFeatures(f"matched_fieldwork_shot_id = '{point_2['id']}'"), None)
+            if p2_matched_fr_shot:
+                p2_matched_fr_shot["matched_fieldwork_shot_id"] = avg_shot["id"]
+                assert_true(self.fieldrunshot_layer.updateFeature(p2_matched_fr_shot), "Failed to update point 1's matched fieldrun shot.")
 
         # parent children to new shot and save changes
         assert_true(self.layer.addFeature(avg_shot), "Failed to add average shot.")
         point_1["parent_point_id"] = avg_shot["id"]
-        assert_true(self.layer.updateFeature(point_1), "Failed to parent point 1 to average shot.")
         point_2["parent_point_id"] = avg_shot["id"]
+        assert_true(self.layer.updateFeature(point_1), "Failed to parent point 1 to average shot.")
         assert_true(self.layer.updateFeature(point_2), "Failed to parent point 2 to average shot.")
 
     def __prompt_user_with_same_point(self, point_1: QgsFeature, point_2: QgsFeature) -> None:
@@ -241,11 +249,13 @@ class FindSamePointShots:
 
     def run(self):
         self.layer.startEditing()
+        self.fieldrunshot_layer.startEditing()
         for i in range(MAX_SOLVING_ITERATIONS):
             QgsMessageLog.logMessage(f"Solving iteration {i + 1}.")
             changed = False
 
-            with timed("find pairs"), progress_dialog("Searching for same point shots...", indeterminate=True):
+            with timed("find pairs"), progress_dialog("Searching for same point shots...") as sp:
+                sp(50)
                 pairs = self.__find_same_point_shots()
 
             for pair in pairs:
@@ -254,4 +264,5 @@ class FindSamePointShots:
             if not changed:
                 QgsMessageLog.logMessage("No new pairs found, breaking out of loop.")
                 break
-        self.layer.commitChanges()
+        assert_true(self.layer.commitChanges(), "Failed to commit changes to fieldworkshot layer.")
+        assert_true(self.fieldrunshot_layer.commitChanges(), "Failed to commit changes to fieldrunshot layer.")

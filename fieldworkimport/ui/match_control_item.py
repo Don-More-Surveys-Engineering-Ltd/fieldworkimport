@@ -22,16 +22,10 @@ class ControlMatchResult:
     # if matched_fieldrunshot is None, create a new fieldrunshot using this name.
 
 
-def calc_redisuals(layers: "FieldworkImportLayers", fw_shot: QgsFeature, fr_shot: QgsFeature) -> tuple[float, float, float | None] | None:  # noqa: D103, E501, UP037
-    fr_shot_id = fr_shot["id"]
-    controlpointdata: QgsFeature | None = next(layers.controlpointdata_layer.getFeatures(f"\"fieldrun_shot_id\" = '{fr_shot_id}'"), None)  # type: ignore []  # noqa: E501
-    if not controlpointdata:
-        msg = "Fieldrun Shot has no control point data. Invalid for control residuals."
-        raise ValueError(msg)
-
-    fr_easting: float = controlpointdata["easting"]
-    fr_northing: float = controlpointdata["northing"]
-    fr_elevation: float = controlpointdata["elevation"]
+def calc_redisuals(fw_shot: QgsFeature, fr_shot: QgsFeature) -> tuple[float, float, float | None] | None:  # noqa: D103
+    fr_easting: float = fr_shot["control_easting"]
+    fr_northing: float = fr_shot["control_northing"]
+    fr_elevation: float = fr_shot["control_elevation"]
 
     if nullish(fr_easting) or nullish(fr_northing):
         return None
@@ -108,7 +102,7 @@ class MatchControlItem(QWidget, Ui_match_control_item):
         radio = QRadioButton()
         suggestion_name = suggestion_fieldrun_shot["name"]
         try:
-            residuals = calc_redisuals(self.layers, self.fieldwork_shot, suggestion_fieldrun_shot)
+            residuals = calc_redisuals(self.fieldwork_shot, suggestion_fieldrun_shot)
         except ValueError as e:
             QgsMessageLog.logMessage(str(e))
             return

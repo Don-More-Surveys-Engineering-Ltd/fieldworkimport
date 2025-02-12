@@ -65,12 +65,10 @@ def summary_str(names: list[str]):
 
 
 def get_report_variables(fieldwork_feature: QgsFeature, plugin_input: "PluginInput | None", job_number: str, client_name: str):
-    fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", raise_exception=True, no_filter=True)[0]
     fieldworkshot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", raise_exception=True, no_filter=True, require_geom=True)[0]
     fieldrun_layer = get_layers_by_table_name("public", "sites_fieldrun", raise_exception=True, no_filter=True)[0]
     fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", raise_exception=True, no_filter=True, require_geom=True)[0]
     fieldrunshotimage_layer = get_layers_by_table_name("public", "sites_fieldrunshotimage", raise_exception=True, no_filter=True)[0]
-    controlpointdata_layer = get_layers_by_table_name("public", "sites_controlpointdata", raise_exception=True, no_filter=True)[0]
     fieldwork_id = fieldwork_feature["id"]
     fieldrun_id = fieldwork_feature["field_run_id"]
     fieldrun_feature = None
@@ -87,9 +85,7 @@ def get_report_variables(fieldwork_feature: QgsFeature, plugin_input: "PluginInp
         "final_shots": [],
         "observed_controls_summary_str": "",
         "new_controls_summary_str": "",
-        "coordinate_shift": {
-            "shift_controls": [],
-        },
+        "coordinate_shift_controls": [],
         "observed_controls": [],
         "new_controls": [],
         "averaged_shots": [],
@@ -138,7 +134,6 @@ def get_report_variables(fieldwork_feature: QgsFeature, plugin_input: "PluginInp
             continue
 
         name = fw_shot["name"]
-        matching_fieldrun_shot_id = fw_shot["matching_fieldrun_shot_id"]
 
         # build out top level shots (a.k.a. final shots) section of report
         top_level_shots.append(fw_shot)
@@ -150,19 +145,21 @@ def get_report_variables(fieldwork_feature: QgsFeature, plugin_input: "PluginInp
                 "child_shots": child_by_parent_id[fw_shot_id],
             })
 
-        if nullish(matching_fieldrun_shot_id):
-            continue
-        matching_fr_shot = next(fieldrunshot_layer.getFeatures(f"id = '{matching_fieldrun_shot_id}'"))
-        fr_shot_name = matching_fr_shot["name"]
-
         # build out control point section
-        controlpointdata = next(controlpointdata_layer.getFeatures(f"fieldrun_shot_id = '{matching_fieldrun_shot_id}'"), None)
-        if controlpointdata is None:
+        matched_fr_shot = next(fieldrunshot_layer.getFeatures(f"matched_fieldwork_shot_id = '{fw_shot_id}'"), None)
+        if matched_fr_shot is None:
             continue
 
-        published_by_fieldwork_id = controlpointdata["published_by_fieldwork_id"]
+        fr_shot_name = matched_fr_shot["name"]
+        fr_shot_id = matched_fr_shot["id"]
+
+        # skip rest of loop body if it's not a control
+        if matched_fr_shot["type"] != "Control":
+            continue
+
+        published_by_fieldwork_id = matched_fr_shot["control_published_by_fieldwork_id"]
         # check if the control point has an easting as a test to see if it's been published yet
-        has_been_published = not nullish(controlpointdata["easting"])
+        has_been_published = not nullish(matched_fr_shot["control_easting"])
 
         if not has_been_published:
             continue
@@ -171,16 +168,14 @@ def get_report_variables(fieldwork_feature: QgsFeature, plugin_input: "PluginInp
             QgsMessageLog.logMessage("-- published")
             report["new_controls"].append({
                 "fw_shot": fw_shot,
-                "fr_shot": matching_fr_shot,
-                "control_point_data": controlpointdata,
+                "fr_shot": matched_fr_shot,
             })
             new_control_names.append(fr_shot_name)
         else:
             QgsMessageLog.logMessage("-- observed")
             report["observed_controls"].append({
                 "fw_shot": fw_shot,
-                "fr_shot": matching_fr_shot,
-                "control_point_data": controlpointdata,
+                "fr_shot": matched_fr_shot,
             })
             observed_control_names.append(fr_shot_name)
 
@@ -191,14 +186,7 @@ def get_report_variables(fieldwork_feature: QgsFeature, plugin_input: "PluginInp
     shift_controls: list[QgsFeature] = [*fieldrunshot_layer.getFeatures(f"id in ({shift_control_ids_cause})")]  # type: ignore
     for shift_control in shift_controls:
         QgsMessageLog.logMessage(f"- {shift_control['name']}")
-        shift_control_id = shift_control["id"]
-        # build out control point section
-        controlpointdata = next(controlpointdata_layer.getFeatures(f"fieldrun_shot_id = '{shift_control_id}'"))
-
-        report["coordinate_shift"]["shift_controls"].append({
-            "fr_shot": shift_control,
-            "control_point_data": controlpointdata,
-        })
+        report["coordinate_shift_controls"].append(shift_control)
 
     report["shots_summary_str"] = summary_str(top_level_shot_names)
     report["new_controls_summary_str"] = ", ".join(new_control_names)

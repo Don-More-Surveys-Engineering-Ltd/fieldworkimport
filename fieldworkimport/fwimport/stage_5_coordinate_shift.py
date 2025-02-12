@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 class CoordinateShiftStage:
     layers: FieldworkImportLayers
-    fw_matching_fieldrun_shot_id_index: int
     fieldwork: QgsFeature
     fieldrun_id: int | None
     plugin_input: PluginInput
@@ -31,9 +30,6 @@ class CoordinateShiftStage:
         self.fieldrun_id = fieldrun_id
         self.plugin_input = plugin_input
 
-        fw_fields = self.layers.fieldworkshot_layer.fields()
-        self.fw_matching_fieldrun_shot_id_index = fw_fields.indexFromName("matching_fieldrun_shot_id")
-
     def run(self):
         QgsMessageLog.logMessage(
             "CoordinateShiftStage.run started.",
@@ -48,21 +44,19 @@ class CoordinateShiftStage:
         points: list[QgsFeature] = [*self.layers.fieldworkshot_layer.getFeatures(
             f"""
             fieldwork_id = '{self.fieldwork['id']}' AND
-            code in ({cp_code_clause}) AND
-            matching_fieldrun_shot_id is not null
+            code in ({cp_code_clause})
             """,
         )]  # type: ignore []
 
         for fieldworkshot in points:
-            fieldrunshot = next(self.layers.fieldrunshot_layer.getFeatures(f"id = '{fieldworkshot['matching_fieldrun_shot_id']}'"))  # noqa: E501
-            controlpointdata = next(self.layers.controlpointdata_layer.getFeatures(f"fieldrun_shot_id = '{fieldrunshot['id']}'"), None)  # noqa: E501
-            if not controlpointdata:
-                QgsMessageLog.logMessage(f"Matched fieldrunshot has no controlpoint data. ({fieldrunshot['id']=})")
+            fieldrunshot = next(self.layers.fieldrunshot_layer.getFeatures(f"matched_fieldwork_shot_id = '{fieldworkshot['id']}'"), None)  # noqa: E501
+            if not fieldrunshot:
+                QgsMessageLog.logMessage(f"Fieldwork shot has no matched fieldrun shot. ({fieldworkshot['id']=})")
                 continue
 
-            published_easting = controlpointdata["easting"]
-            published_northing = controlpointdata["northing"]
-            published_elevation = controlpointdata["elevation"]
+            published_easting = fieldrunshot["control_easting"]
+            published_northing = fieldrunshot["control_northing"]
+            published_elevation = fieldrunshot["control_elevation"]
 
             # check if easting an northing is set, and if not, it's new and we can't use it for a shift
             if nullish(published_easting) or nullish(published_northing):
