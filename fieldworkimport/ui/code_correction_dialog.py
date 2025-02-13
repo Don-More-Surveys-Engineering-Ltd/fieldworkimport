@@ -23,7 +23,7 @@ class CodeCorrectionDialog(QDialog, Ui_CodeCorrectionDialog):
         self.valid_special_chars = valid_special_chars
         self.parameterized_special_chars = parameterized_special_chars
 
-        self.original_code_text.setText(description)
+        self.original_code_label.setText(description)
         self.correction_input.setText(description)
 
     @staticmethod

@@ -17,7 +17,7 @@ from qgis.utils import iface as _iface
 
 from fieldworkimport.common import get_average_point, parent_point_name
 from fieldworkimport.exceptions import AbortError
-from fieldworkimport.helpers import assert_true, get_layers_by_table_name, nullish, progress_dialog, timed
+from fieldworkimport.helpers import assert_true, get_layers_by_table_name, nullish, timed
 from fieldworkimport.ui.possible_same_point_shot_dialog import PossibleSamePointShotDialog
 from fieldworkimport.ui.recalculate_shot_dialog import RecalculateShotDialog
 
@@ -34,8 +34,8 @@ def is_layer_type(layer: QgsMapLayer, schema: str, table: str):
     return bool(src_table_snippet in src or src.endswith(src_layername_snippet))
 
 
-class FindSamePointShots:
-    """Find same point shots, and decide on how to handle them.
+class FindGlobalSamePointShots:
+    """Search for pairs of shots with the same code within 0.075 meters of eachother.
 
     Input is the current selection QGIS (must be a sites_fieldworkshot layer).
     Only those shots will be used for calcuations, including nearest neighbor.
@@ -43,6 +43,9 @@ class FindSamePointShots:
     This process is solved in iterations. This is because the algorithm finds pairs of same point shots,
     and there may be more than two same poitn shots. So once one pair is decided on, we'll recalculate and
     see if there is a second pair.
+
+    This serves to integrate the new fieldwork into the history of existing fieldwork,
+        finding which shots represent the same point.
     """
 
     layer: QgsVectorLayer
@@ -250,14 +253,15 @@ class FindSamePointShots:
     def run(self):
         self.layer.startEditing()
         self.fieldrunshot_layer.startEditing()
+        changed = False  # initialize changed to false, if it gets set to true we run another iteration
+        # run at most MAX iterations, but stop early if theres no changes
         for i in range(MAX_SOLVING_ITERATIONS):
             QgsMessageLog.logMessage(f"Solving iteration {i + 1}.")
-            changed = False
 
-            with timed("find pairs"), progress_dialog("Searching for same point shots...") as sp:
-                sp(50)
+            with timed("find pairs"):
                 pairs = self.__find_same_point_shots()
 
+            changed = False
             for pair in pairs:
                 changed = True
                 self.__prompt_user_with_same_point(pair[0], pair[1])

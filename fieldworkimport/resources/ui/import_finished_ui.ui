@@ -35,6 +35,16 @@
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_2">
       <item>
+       <widget class="QCheckBox" name="next_check_same_point_shots_checkbox">
+        <property name="text">
+         <string>Check for same-point shots in other fieldwork</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+      <item>
        <widget class="QCheckBox" name="next_publish_controls_checkbox">
         <property name="text">
          <string>Find and publish new controls (PublishControls plugin)</string>

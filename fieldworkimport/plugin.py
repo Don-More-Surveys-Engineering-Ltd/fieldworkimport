@@ -22,8 +22,8 @@ from fieldworkimport.helpers import (
     settings_key,
     timed,
 )
-from fieldworkimport.reportgen.report_process import create_report, get_report_variables
-from fieldworkimport.samepointshots.findsamepointshots_process import FindSamePointShots
+from fieldworkimport.reportgen.report_process import create_report, gather_report_variables
+from fieldworkimport.samepointshots.findsamepointshots_process import FindGlobalSamePointShots
 from fieldworkimport.ui.delete_dialog import DeleteFieldworkDialog
 from fieldworkimport.ui.generate_report_dialog import GenerateReportDialog
 from fieldworkimport.ui.import_finished_dialog import ImportFinishedDialog
@@ -37,7 +37,7 @@ from fieldworkimport.ui.import_dialog import ImportFieldworkDialog
 
 @dataclass
 class PluginInput:
-    """Holds validation settings and import input."""
+    """Holds import input to be passwd around."""
 
     crdb_path: str
     rw5_path: str
@@ -129,7 +129,9 @@ class Plugin:
 
     def initGui(self) -> None:  # noqa: N802
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
-        self.setup_settings()
+        self._setup_settings()
+
+        # add different toolbar/dropdown buttons
         self.add_action(
             "",
             text="Change Settings",
@@ -138,7 +140,7 @@ class Plugin:
             add_to_toolbar=False,
         )
         self.add_action(
-            str(BASE_DIR / "resources" / "icons" / "noun-geodesy-7254004.svg"),
+            str(BASE_DIR / "resources" / "icons" / "new_import.png"),
             text="Import Fieldwork",
             callback=self.start_import,
             parent=iface.mainWindow(),
@@ -161,7 +163,7 @@ class Plugin:
         self.add_action(
             "",
             text="Find Same-point Shots",
-            callback=self.start_find_same_point_shots,
+            callback=self.start_find_same_point_shots_global,
             parent=iface.mainWindow(),
             add_to_toolbar=False,
         )
@@ -182,7 +184,8 @@ class Plugin:
             iface.removePluginMenu(Plugin.name, action)
             iface.removeToolBarIcon(action)
 
-    def setup_settings(self):
+    def _setup_settings(self) -> None:  # noqa: PLR6301
+        """Setup the plugin settings for the first time."""  # noqa: D401, DOC501
         s = QgsSettings()
 
         validation_file_path = BASE_DIR / "resources" / "validation_settings.json"
@@ -216,22 +219,33 @@ class Plugin:
         if not s.contains(key):
             s.setValue(key, False)  # noqa: FBT003
 
-    def _setup_import_dialog(self) -> ImportFieldworkDialog:
-        dialog = ImportFieldworkDialog()
-
-        return dialog
-
-    def _on_accept_new_form(self):
-        if not self.import_dialog:
+    def start_import(self) -> None:
+        """Start the import process by showing import dialog."""
+        project = QgsProject.instance()
+        fieldwork_layer_present = len(get_layers_by_table_name("public", "sites_fieldwork", no_filter=True)) > 0
+        if project is None or not fieldwork_layer_present:
+            msg = QMessageBox()
+            msg.setIcon(QMessageBox.Information)
+            msg.setText("No project found.")
+            msg.setInformativeText("Please open a DMSE fieldwork project first.")
+            msg.setWindowTitle("No Project Found")
+            msg.exec()
             return
 
+        new_import_dialog = ImportFieldworkDialog()
+        return_code = new_import_dialog.exec_()
+
+        if return_code == new_import_dialog.Rejected:
+            return
+
+        # create a dataclass to pass around the input variables to the different steps.
         self.plugin_input = PluginInput(
-            crdb_path=self.import_dialog.crdb_file_input.filePath(),
-            rw5_path=self.import_dialog.rw5_file_input.filePath(),
-            sum_path=self.import_dialog.sum_file_input.filePath(),
-            ref_path=self.import_dialog.ref_file_input.filePath(),
-            loc_path=self.import_dialog.loc_file_input.filePath(),
-            fieldrun_feature=self.import_dialog.fieldrun_input.feature(),
+            crdb_path=new_import_dialog.crdb_file_input.filePath(),
+            rw5_path=new_import_dialog.rw5_file_input.filePath(),
+            sum_path=new_import_dialog.sum_file_input.filePath(),
+            ref_path=new_import_dialog.ref_file_input.filePath(),
+            loc_path=new_import_dialog.loc_file_input.filePath(),
+            fieldrun_feature=new_import_dialog.fieldrun_input.feature(),
         )
 
         fwimport = FieldworkImportProcess(
@@ -249,7 +263,7 @@ class Plugin:
         import_finished_dialog = ImportFinishedDialog()
         return_code = import_finished_dialog.exec_()
 
-        # rollback if requested
+        # rollback if aborted
         if return_code == ImportFinishedDialog.Rejected:
             fwimport.rollback()
             return
@@ -274,37 +288,28 @@ class Plugin:
         # then select all points in bbox of fieldwork shots to get shots from other fieldwork
         bbox = fwimport.layers.fieldworkshot_layer.boundingBoxOfSelected()
         fwimport.layers.fieldworkshot_layer.selectByRect(bbox)
-        # then run find_same_point_shots
-        self.start_find_same_point_shots()
 
         # refresh fieldwork feature to get populated one with a fid
         refreshed_fieldwork = next(fwimport.layers.fieldwork_layer.getFeatures(f"id = '{fwimport.fieldwork_feature['id']}'"))
-        # publish controls if requested
+
+        # --- OPTIONAL STEPS ---
+
+        # then check for same-point shots collisions in other exisitng fieldwork if requested
+        if import_finished_dialog.next_check_same_point_shots_checkbox.isChecked():
+            self.start_find_same_point_shots_global()
+        # then check for unpublished controls in this fieldwork to publish if requested
         if import_finished_dialog.next_publish_controls_checkbox.isChecked():
-            with timed("start_publish_controls"):
-                self.start_publish_controls(default_fieldwork=refreshed_fieldwork)
-        # create report if requested
+            self.start_publish_controls(default_fieldwork=refreshed_fieldwork)
+        # then create report for this fieldwork if requested
         if import_finished_dialog.next_create_report_checkbox.isChecked():
             self.start_generate_report(default_fieldwork=refreshed_fieldwork)
 
-    def start_import(self) -> None:
-        """Run method that performs all the real work."""
-        project = QgsProject.instance()
-        fieldwork_layer_present = len(get_layers_by_table_name("public", "sites_fieldwork", no_filter=True)) > 0
-        if project is None or not fieldwork_layer_present:
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Information)
-            msg.setText("No project found.")
-            msg.setInformativeText("Please open a DMSE fieldwork project first.")
-            msg.setWindowTitle("No Project Found")
-            msg.exec()
-            return
-
-        self.import_dialog = self._setup_import_dialog()
-        self.import_dialog.show()
-        self.import_dialog.accepted.connect(self._on_accept_new_form)
-
     def start_publish_controls(self, *args, default_fieldwork: QgsFeature | None = None):
+        """Open a dialog with unplublished controls that match with the selected fieldwork.
+
+        Allow user to edit information on those controls, and autopopulate easting northing elevation from matched
+        fieldwork shot.
+        """
         with progress_dialog("Searching for new controls...") as sp:
             sp(25)
             dialog = PublishControlsDialog(default_fieldwork)
@@ -312,69 +317,109 @@ class Plugin:
         dialog.exec_()
 
     def start_generate_report(self, *args, default_fieldwork: QgsFeature | None = None):
+        """Open a dialog with the fieldwork and some fields for information to display in the report.
+
+        Then generate report for fieldwork.
+
+        The report can be run as the finishing part of the import wizard, or on its own from the plugin drop down menu.
+        If it is run as part of the wizard, the raw data from the files given to the wizard are passed to the report,
+            and the report will feature a raw data section.
+        """
+        # if the report is generated as part of the import wizard, we have access to the plugin input/raw data.
+        # we use the path to the raw data files to figure out where to save the report to on the file system.
         default_save_path = None
         if self.plugin_input and self.plugin_input.crdb_path:
             default_save_path = str(Path(self.plugin_input.crdb_path).parent)
+
+        # show dialog
         dialog = GenerateReportDialog(default_fieldwork, default_save_path)
         return_code = dialog.exec_()
         if return_code == dialog.Rejected:
             return
+
+        # get field values from dialog
         fieldwork_feature = dialog.fieldwork_input.feature()
         job_number = dialog.job_number_input.text()
         client_name = dialog.client_name_input.text()
         output_folder_path = Path(dialog.output_folder_input.filePath())
 
         s = QgsSettings()
-        debug_mode: bool = s.value(settings_key("debug_mode"), False, bool)
+        debug_mode: bool = s.value(settings_key("debug_mode"), False, bool)  # noqa: FBT003
 
         with progress_dialog("Generating Report...") as sp:
-            report_vars = get_report_variables(fieldwork_feature, self.plugin_input, job_number, client_name)
+            # gather fieldwork data needed for the report
+            report_vars = gather_report_variables(fieldwork_feature, self.plugin_input, job_number, client_name)
             sp(25)
             if debug_mode:
                 with (output_folder_path / "report_vars.txt").open("w") as fptr:
                     fptr.write(pprint.pformat(report_vars))
             sp(75)
+            # render report out to html with report vars
             with (output_folder_path / "Fieldwork Report.html").open("w") as fptr:
                 html = create_report(report_vars)
                 fptr.write(html)
 
-    def start_find_same_point_shots(self):
+    def start_find_same_point_shots_global(self):
+        """Search for pairs of shots with the same code within 0.075 meters of eachother with in the QGIS selected features.
+
+        Then prompt the user with a choice on which point to keep/parent, and a choice to
+            create a completely new point with the root points that make up the two shots in question (this has it's
+            own dialog for selecting which shots to calculate from).
+
+        This serves to integrate the new fieldwork into the history of existing fieldwork,
+            finding which shots represent the same point.
+        """  # noqa: E501
         with timed("class setup"):
-            shot_merge = FindSamePointShots()
+            shot_merge = FindGlobalSamePointShots()
         shot_merge.run()
 
     def start_validation_settings(self):
+        """Prompt user with settings on how this plugin runs.
+
+        Includes tolerances, which codes are valid, etc.
+        """
         dialog = ValidationSettingsDialog()
         dialog.exec()
 
     def start_delete_fieldwork(self):
+        """Allow user to select a fieldwork to delete in a dialog.
+
+        Then delete it.
+        """
         dialog = DeleteFieldworkDialog()
         return_code = dialog.exec_()
         if return_code == dialog.Rejected:
             return
 
-        fieldwork = dialog.fieldwork_input.feature()
+        with progress_dialog("Deleting fieldwork...") as sp:
+            # setup
+            fieldwork = dialog.fieldwork_input.feature()
+            fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0]
+            fieldworkshot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
+            fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", no_filter=True, raise_exception=True)[0]
+            fieldwork_layer.startEditing()
+            fieldworkshot_layer.startEditing()
+            fieldrunshot_layer.startEditing()
+            sp(25)
 
-        fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0]
-        fieldworkshot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
-        fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", no_filter=True, raise_exception=True)[0]
-        fieldwork_layer.startEditing()
-        fieldworkshot_layer.startEditing()
-        fieldrunshot_layer.startEditing()
-
-        shots: list[QgsFeature] = [*fieldworkshot_layer.getFeatures(f"\"fieldwork_id\" = '{fieldwork.attribute('id')}'")]  # type: ignore
-        for shot in shots:
-            matched_fieldrun_shot = next(fieldrunshot_layer.getFeatures(f"matched_fieldwork_shot_id = '{shot['id']}'"), None)
-            if matched_fieldrun_shot:
-                matched_fieldrun_shot["matched_fieldwork_shot_id"] = None
-                fieldrunshot_layer.updateFeature(matched_fieldrun_shot)
-
-        assert_true(fieldworkshot_layer.deleteFeatures([shot.id() for shot in shots]), "Failed to delete fieldworkshots.")
-        assert_true(fieldwork_layer.deleteFeature(fieldwork.id()), "Failed to delete fieldwork.")
-
-        assert_true(fieldrunshot_layer.commitChanges(), "Failed to commit fieldworkshot layer.")
-        assert_true(fieldworkshot_layer.commitChanges(), "Failed to commit fieldworkshot layer.")
-        assert_true(fieldwork_layer.commitChanges(), "Failed to commit fieldwork layer.")
+            # remove matches from fieldrun shots
+            shots: list[QgsFeature] = [*fieldworkshot_layer.getFeatures(f"\"fieldwork_id\" = '{fieldwork.attribute('id')}'")]  # type: ignore
+            for shot in shots:
+                matched_fieldrun_shot = next(fieldrunshot_layer.getFeatures(f"matched_fieldwork_shot_id = '{shot['id']}'"), None)
+                if matched_fieldrun_shot:
+                    matched_fieldrun_shot["matched_fieldwork_shot_id"] = None
+                    fieldrunshot_layer.updateFeature(matched_fieldrun_shot)
+            sp(50)
+            # delete features
+            assert_true(fieldworkshot_layer.deleteFeatures([shot.id() for shot in shots]), "Failed to delete fieldworkshots.")
+            assert_true(fieldwork_layer.deleteFeature(fieldwork.id()), "Failed to delete fieldwork.")
+            sp(75)
+            # commit changes
+            assert_true(fieldrunshot_layer.commitChanges(), "Failed to commit fieldworkshot layer.")
+            sp(85)
+            assert_true(fieldworkshot_layer.commitChanges(), "Failed to commit fieldworkshot layer.")
+            sp(95)
+            assert_true(fieldwork_layer.commitChanges(), "Failed to commit fieldwork layer.")
 
         # refresh all layers to show new points
         canvas = iface.mapCanvas()

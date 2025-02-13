@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
     layers: FieldworkImportLayers
-    selected_fieldwork: QgsFeature | None
     fieldwork_layer: QgsVectorLayer
     fieldworkshot_layer: QgsVectorLayer
     fieldrunshot_layer: QgsVectorLayer
@@ -27,27 +26,22 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
     ) -> None:
         super().__init__(parent)
         self.setupUi(self)
-        self.selected_fieldwork = default_fieldwork
+
+        self.no_results_msg.hide()
 
         self.fieldwork_layer = get_layers_by_table_name("public", "sites_fieldwork", no_filter=True, raise_exception=True)[0]
         self.fieldworkshot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", no_filter=True, raise_exception=True)[0]
         self.fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", no_filter=True, raise_exception=True)[0]
         self.fieldwork_input.setLayer(self.fieldwork_layer)
-        self.fieldwork_input.featureChanged.connect(self.selected_fieldwork_changed)
+        self.fieldwork_input.modelUpdated.connect(self.find_elligble_controls)
         if default_fieldwork:
             self.fieldwork_input.setFeature(default_fieldwork.id())
-            self.find_elligble_controls()
 
     def reset_controls_list(self):
         for item in list(self.scrollAreaWidgetContents.children()):
             if isinstance(item, PublishControlItem):
                 item.setParent(None)  # type: ignore
                 del item
-
-    def selected_fieldwork_changed(self):
-        self.selected_fieldwork = self.fieldwork_input.feature()
-        if not nullish(self.selected_fieldwork):
-            self.find_elligble_controls()
 
     def add_control(self, control: QgsFeature):
         self.scrollAreaWidgetContents.layout().addWidget(
@@ -61,14 +55,19 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
         return True
 
     def find_elligble_controls(self):
+        """Runs when selected fieldwork changes."""
+        selected_fieldwork = self.fieldwork_input.feature()
         s = QgsSettings()
         control_point_codes = s.value(settings_key("control_point_codes")).split(",")
         cp_code_clause = ", ".join([f"'{code}'" for code in control_point_codes])
-        if nullish(self.selected_fieldwork):
+        if nullish(selected_fieldwork) or not isinstance(selected_fieldwork, QgsFeature) or nullish(selected_fieldwork.attribute("id")):
+            QgsMessageLog.logMessage("No fieldwork selected.")
             return
-        assert not nullish(self.selected_fieldwork) and isinstance(self.selected_fieldwork, QgsFeature)  # noqa: S101
+
         self.reset_controls_list()
-        fieldwork_id = self.selected_fieldwork["id"]
+        fieldwork_id = selected_fieldwork["id"]
+
+        no_results = True
         with timed("findfind_elligble_controls __internal"):
             fieldworkshots: list[QgsFeature] = [*self.fieldworkshot_layer.getFeatures(
                 f"""
@@ -92,9 +91,16 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
                     QgsMessageLog.logMessage(f"shot {shot['name']} no fieldrunshot")
                     continue
 
+                no_results = False
                 self.add_control(shot)
 
+        if no_results:
+            self.no_results_msg.show()
+        else:
+            self.no_results_msg.hide()
+
     def publish_controls(self):
+        selected_fieldwork = self.fieldwork_input.feature()
         self.fieldworkshot_layer.startEditing()
         self.fieldrunshot_layer.startEditing()
 
@@ -116,14 +122,14 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
             fieldrunshot[frs_fields.indexFromName("description")] = description
             # update control point data to set published_by_fieldwork_id
             # lets us know that the control point coords were published by this fieldwork.
-            if self.selected_fieldwork:
-                fieldrunshot[frs_fields.indexFromName("control_published_by_fieldwork_id")] = self.selected_fieldwork["id"]
+            if not nullish(selected_fieldwork) and isinstance(selected_fieldwork, QgsFeature) and "id" in selected_fieldwork:
+                fieldrunshot[frs_fields.indexFromName("control_published_by_fieldwork_id")] = selected_fieldwork["id"]
 
             fieldrunshot[frs_fields.indexFromName("control_coordinate_system_id")] = coord_system["id"]
-            fieldrunshot[frs_fields.indexFromName("control_easting")] = fieldworkshot["easting"]
-            fieldrunshot[frs_fields.indexFromName("control_northing")] = fieldworkshot["northing"]
+            fieldrunshot[frs_fields.indexFromName("control_easting")] = round(fieldworkshot["easting"], 4)
+            fieldrunshot[frs_fields.indexFromName("control_northing")] = round(fieldworkshot["northing"], 4)
             fieldrunshot[frs_fields.indexFromName("control_elevation_system_id")] = elevation_system["id"]
-            fieldrunshot[frs_fields.indexFromName("control_elevation")] = fieldworkshot["elevation"]
+            fieldrunshot[frs_fields.indexFromName("control_elevation")] = round(fieldworkshot["elevation"], 2)
             assert_true(self.fieldrunshot_layer.updateFeature(fieldrunshot), "Failed to update fieldrun shot.")
 
         fail_msg = "Failed to commit %s."

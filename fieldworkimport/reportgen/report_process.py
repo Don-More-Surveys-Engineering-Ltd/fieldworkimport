@@ -64,7 +64,7 @@ def summary_str(names: list[str]):
     return f"{sorted_names[0]} - {sorted_names[-1]}"
 
 
-def get_report_variables(fieldwork_feature: QgsFeature, plugin_input: "PluginInput | None", job_number: str, client_name: str):
+def gather_report_variables(fieldwork_feature: QgsFeature, plugin_input: "PluginInput | None", job_number: str, client_name: str):
     fieldworkshot_layer = get_layers_by_table_name("public", "sites_fieldworkshot", raise_exception=True, no_filter=True, require_geom=True)[0]
     fieldrun_layer = get_layers_by_table_name("public", "sites_fieldrun", raise_exception=True, no_filter=True)[0]
     fieldrunshot_layer = get_layers_by_table_name("public", "sites_fieldrunshot", raise_exception=True, no_filter=True, require_geom=True)[0]
