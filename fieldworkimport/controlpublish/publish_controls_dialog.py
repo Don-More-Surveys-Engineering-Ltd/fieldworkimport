@@ -122,9 +122,7 @@ class PublishControlsDialog(QDialog, Ui_PublishControlsDialog):
             fieldrunshot[frs_fields.indexFromName("description")] = description
             # update control point data to set published_by_fieldwork_id
             # lets us know that the control point coords were published by this fieldwork.
-            if not nullish(selected_fieldwork) and isinstance(selected_fieldwork, QgsFeature) and "id" in selected_fieldwork:
-                fieldrunshot[frs_fields.indexFromName("control_published_by_fieldwork_id")] = selected_fieldwork["id"]
-
+            fieldrunshot[frs_fields.indexFromName("control_published_by_fieldwork_id")] = selected_fieldwork["id"]
             fieldrunshot[frs_fields.indexFromName("control_coordinate_system_id")] = coord_system["id"]
             fieldrunshot[frs_fields.indexFromName("control_easting")] = round(fieldworkshot["easting"], 4)
             fieldrunshot[frs_fields.indexFromName("control_northing")] = round(fieldworkshot["northing"], 4)
